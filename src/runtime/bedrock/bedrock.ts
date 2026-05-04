@@ -20,9 +20,9 @@ class BedrockSession implements Session {
   readonly threadId = randomUUID();
   constructor(private readonly workspacePath: string, private readonly builtins: string[]) {}
   async runTurn(opts: RunTurnOpts): Promise<TurnResult> {
-    opts.onEvent({ type: "bedrock_turn_started", timestamp: new Date().toISOString() });
+    opts.onEvent({ type: "bedrock_experimental_runtime", timestamp: new Date().toISOString() });
     for (const tool of builtinTools(this.builtins, this.workspacePath)) opts.tools.push(tool);
-    return { status: "completed", output: "Bedrock runtime harness initialized.", tokens: { input: 0, output: 0, total: 0 } };
+    return { status: "failed", output: "Bedrock Anthropic runtime is experimental: model execution and tool calling are not implemented yet.", tokens: { input: 0, output: 0, total: 0 } };
   }
   async stop(): Promise<void> {}
 }

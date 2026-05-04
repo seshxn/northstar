@@ -80,4 +80,73 @@ describe("SPEC 17.1 workflow loading and config", () => {
     expect(prompt).toBe("Ship SYM-1 / backend");
     await expect(renderPrompt("{{ missing.value }}", { issue: {} })).rejects.toThrow(/missing/i);
   });
+
+  test("parses optional prompt-level skill profiles", () => {
+    const config = parseWorkflowConfig({
+      skills: {
+        enabled: true,
+        mode: "prompt_injection",
+        default_sequence: ["spec", "plan"],
+        label_sequences: {
+          security: ["threat_model", "security_review"]
+        }
+      }
+    });
+
+    expect(config.skills).toEqual({
+      enabled: true,
+      mode: "prompt_injection",
+      default_sequence: ["spec", "plan"],
+      label_sequences: {
+        security: ["threat_model", "security_review"]
+      }
+    });
+  });
+
+  test("parses optional policy and feedback config", () => {
+    const config = parseWorkflowConfig({
+      policy: {
+        allowed_tools: ["github"],
+        disallowed_tools_by_label: { docs: ["slack_post"] }
+      },
+      feedback: {
+        comments_enabled: false,
+        transitions: {
+          completed_state: "Review"
+        }
+      }
+    });
+
+    expect(config.policy.allowed_tools).toEqual(["github"]);
+    expect(config.policy.disallowed_tools_by_label).toEqual({ docs: ["slack_post"] });
+    expect(config.feedback).toEqual({
+      comments_enabled: false,
+      transitions: {
+        started_state: undefined,
+        completed_state: "Review",
+        failed_state: undefined
+      }
+    });
+  });
+
+  test("parses optional sequential quality gates", () => {
+    const config = parseWorkflowConfig({
+      quality_gates: {
+        enabled: true,
+        default_sequence: ["test", "review"],
+        label_sequences: {
+          security: ["security_review"]
+        }
+      }
+    });
+
+    expect(config.quality_gates).toEqual({
+      enabled: true,
+      mode: "sequential",
+      default_sequence: ["test", "review"],
+      label_sequences: {
+        security: ["security_review"]
+      }
+    });
+  });
 });

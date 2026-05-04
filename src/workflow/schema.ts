@@ -71,6 +71,36 @@ const integrationSchema = z.object({
   confluence: z.object({ enabled: z.boolean().default(false), base_url: z.string().optional(), email: z.string().optional(), api_token: z.string().optional(), default_space: z.string().optional() }).optional()
 }).default({});
 
+const skillsSchema = z.object({
+  enabled: z.boolean().default(false),
+  mode: z.enum(["prompt_injection"]).default("prompt_injection"),
+  default_sequence: stringArray.default([]),
+  label_sequences: z.record(stringArray).default({})
+}).default({});
+
+const policySchema = z.object({
+  allowed_tools: stringArray.default([]),
+  disallowed_tools: stringArray.default([]),
+  allowed_tools_by_label: z.record(stringArray).default({}),
+  disallowed_tools_by_label: z.record(stringArray).default({})
+}).default({});
+
+const feedbackSchema = z.object({
+  comments_enabled: z.boolean().default(true),
+  transitions: z.object({
+    started_state: z.string().optional(),
+    completed_state: z.string().optional(),
+    failed_state: z.string().optional()
+  }).default({})
+}).default({});
+
+const qualityGatesSchema = z.object({
+  enabled: z.boolean().default(false),
+  mode: z.enum(["sequential"]).default("sequential"),
+  default_sequence: stringArray.default([]),
+  label_sequences: z.record(stringArray).default({})
+}).default({});
+
 const workflowSchema = z.object({
   tracker: z.union([linearTrackerSchema, jiraTrackerSchema]).default({ kind: "linear" }),
   runtime: runtimeSchema.default({ kind: "codex_app_server" }),
@@ -92,6 +122,10 @@ const workflowSchema = z.object({
   }).default({}),
   observability: z.object({ dashboard_enabled: z.boolean().default(true), refresh_ms: z.number().int().positive().default(1000), render_interval_ms: z.number().int().positive().default(16) }).default({}),
   server: z.object({ port: z.number().int().nonnegative().optional(), host: z.string().default("127.0.0.1") }).default({}),
+  skills: skillsSchema,
+  quality_gates: qualityGatesSchema,
+  policy: policySchema,
+  feedback: feedbackSchema,
   integrations: integrationSchema
 });
 

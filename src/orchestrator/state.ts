@@ -1,4 +1,5 @@
 import type { Issue } from "../tracker/issue.js";
+import type { RuntimeEvent, TurnResult } from "../runtime/types.js";
 
 export interface RunningEntry {
   issue: Issue;
@@ -7,6 +8,11 @@ export interface RunningEntry {
   lastActivityAt: Date;
   stop: () => Promise<void>;
   attempt?: number;
+  workspacePath?: string;
+  prompt?: string;
+  toolNames?: string[];
+  events: RuntimeEvent[];
+  skillSequence?: string[];
 }
 
 export interface RetryEntry {
@@ -22,6 +28,28 @@ export interface TokenTotals {
   total: number;
 }
 
+export interface RunResultEntry {
+  issueId: string;
+  issue: string;
+  threadId: string;
+  workspacePath: string;
+  status: TurnResult["status"];
+  output?: string;
+  tokens?: TokenTotals;
+  events: RuntimeEvent[];
+  startedAt: Date;
+  completedAt: Date;
+  attempt: number;
+  error?: string;
+  gateResults: GateResultEntry[];
+}
+
+export interface GateResultEntry {
+  gate: string;
+  status: TurnResult["status"];
+  output?: string;
+}
+
 export interface OrchestratorState {
   pollIntervalMs: number;
   maxConcurrentAgents: number;
@@ -33,6 +61,7 @@ export interface OrchestratorState {
   claimed: Set<string>;
   retryAttempts: Map<string, RetryEntry>;
   tokenTotals: TokenTotals;
+  results: Map<string, RunResultEntry>;
 }
 
 export function createInitialState(opts: {
@@ -52,7 +81,8 @@ export function createInitialState(opts: {
     completed: new Set(),
     claimed: new Set(),
     retryAttempts: new Map(),
-    tokenTotals: { input: 0, output: 0, total: 0 }
+    tokenTotals: { input: 0, output: 0, total: 0 },
+    results: new Map()
   };
 }
 
