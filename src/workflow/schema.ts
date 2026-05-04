@@ -1,0 +1,126 @@
+import { tmpdir, homedir } from "node:os";
+import { join } from "node:path";
+import { z } from "zod";
+import { deepResolveEnv, resolvePathValue, type ResolveOpts } from "../config/env.js";
+
+const stringArray = z.array(z.string()).default([]);
+
+const linearTrackerSchema = z.object({
+  kind: z.literal("linear").default("linear"),
+  endpoint: z.string().default("https://api.linear.app/graphql"),
+  api_key: z.string().optional(),
+  project_slug: z.string().optional(),
+  assignee: z.string().optional(),
+  active_states: z.array(z.string()).default(["Todo", "In Progress"]),
+  terminal_states: z.array(z.string()).default(["Closed", "Cancelled", "Canceled", "Duplicate", "Done"])
+});
+
+const jiraTrackerSchema = z.object({
+  kind: z.literal("jira"),
+  endpoint: z.string(),
+  email: z.string(),
+  api_token: z.string(),
+  project_key: z.string(),
+  jql: z.string().optional(),
+  active_states: z.array(z.string()).default(["To Do", "In Progress"]),
+  terminal_states: z.array(z.string()).default(["Done", "Cancelled", "Won't Do"])
+});
+
+const runtimeSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("codex_app_server"),
+    command: z.string().default("codex app-server"),
+    approval_policy: z.unknown().optional(),
+    thread_sandbox: z.string().default("workspace-write"),
+    turn_sandbox_policy: z.record(z.unknown()).optional(),
+    turn_timeout_ms: z.number().int().positive().default(3_600_000),
+    read_timeout_ms: z.number().int().positive().default(5_000),
+    stall_timeout_ms: z.number().int().nonnegative().default(300_000)
+  }),
+  z.object({
+    kind: z.literal("claude_code"),
+    model: z.string().default("claude-opus-4-7"),
+    api_key: z.string().optional(),
+    max_turns: z.number().int().positive().default(50),
+    allowed_tools: stringArray.optional(),
+    disallowed_tools: stringArray.optional(),
+    approval_policy: z.enum(["auto", "prompt", "reject"]).default("auto")
+  }),
+  z.object({
+    kind: z.literal("bedrock_anthropic"),
+    model_id: z.string(),
+    region: z.string().default("us-west-2"),
+    max_tokens: z.number().int().positive().default(8192),
+    aws_profile: z.string().optional(),
+    builtin_tools: stringArray.default(["bash", "read", "write", "edit"])
+  }),
+  z.object({
+    kind: z.literal("gemini"),
+    model: z.string().default("gemini-2.5-pro"),
+    api_key: z.string().optional(),
+    max_tokens: z.number().int().positive().default(8192),
+    builtin_tools: stringArray.default(["bash", "read", "write", "edit"])
+  })
+]);
+
+const integrationSchema = z.object({
+  linear_graphql: z.object({ enabled: z.boolean().default(true) }).optional(),
+  github: z.object({ enabled: z.boolean().default(false), token: z.string().optional(), default_repo: z.string().optional() }).optional(),
+  jira_tools: z.object({ enabled: z.boolean().default(false), base_url: z.string().optional(), email: z.string().optional(), api_token: z.string().optional() }).optional(),
+  slack: z.object({ enabled: z.boolean().default(false), token: z.string().optional(), default_channel: z.string().optional() }).optional(),
+  confluence: z.object({ enabled: z.boolean().default(false), base_url: z.string().optional(), email: z.string().optional(), api_token: z.string().optional(), default_space: z.string().optional() }).optional()
+}).default({});
+
+const workflowSchema = z.object({
+  tracker: z.union([linearTrackerSchema, jiraTrackerSchema]).default({ kind: "linear" }),
+  runtime: runtimeSchema.default({ kind: "codex_app_server" }),
+  polling: z.object({ interval_ms: z.number().int().positive().default(30_000) }).default({}),
+  workspace: z.object({ root: z.string().optional() }).default({}),
+  worker: z.object({ ssh_hosts: stringArray, max_concurrent_agents_per_host: z.number().int().positive().optional() }).default({}),
+  agent: z.object({
+    max_concurrent_agents: z.number().int().positive().default(10),
+    max_turns: z.number().int().positive().default(20),
+    max_retry_backoff_ms: z.number().int().positive().default(300_000),
+    max_concurrent_agents_by_state: z.record(z.number().int().positive()).default({})
+  }).default({}),
+  hooks: z.object({
+    after_create: z.string().optional(),
+    before_run: z.string().optional(),
+    after_run: z.string().optional(),
+    before_remove: z.string().optional(),
+    timeout_ms: z.number().int().positive().default(60_000)
+  }).default({}),
+  observability: z.object({ dashboard_enabled: z.boolean().default(true), refresh_ms: z.number().int().positive().default(1000), render_interval_ms: z.number().int().positive().default(16) }).default({}),
+  server: z.object({ port: z.number().int().nonnegative().optional(), host: z.string().default("127.0.0.1") }).default({}),
+  integrations: integrationSchema
+});
+
+export type NorthstarConfig = z.infer<typeof workflowSchema>;
+export type RuntimeConfig = NorthstarConfig["runtime"];
+export type TrackerConfig = NorthstarConfig["tracker"];
+
+export function parseWorkflowConfig(input: Record<string, unknown>, opts: ResolveOpts = {}): NorthstarConfig {
+  const normalized = normalizeLegacyCodex(deepResolveEnv(input, opts));
+  const parsed = workflowSchema.parse(normalized);
+  return {
+    ...parsed,
+    workspace: {
+      root: resolvePathValue(parsed.workspace.root, join(tmpdir(), "northstar_workspaces"), {
+        env: opts.env,
+        homeDir: opts.homeDir ?? homedir()
+      })
+    },
+    agent: {
+      ...parsed.agent,
+      max_concurrent_agents_by_state: Object.fromEntries(
+        Object.entries(parsed.agent.max_concurrent_agents_by_state).map(([state, limit]) => [state.toLowerCase(), limit])
+      )
+    }
+  };
+}
+
+function normalizeLegacyCodex(input: Record<string, unknown>): Record<string, unknown> {
+  if (input.runtime || !input.codex || typeof input.codex !== "object") return input;
+  const { codex: legacy, ...rest } = input;
+  return { ...rest, runtime: { kind: "codex_app_server", ...(legacy as Record<string, unknown>) } };
+}
