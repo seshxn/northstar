@@ -1,16 +1,25 @@
 import type { Issue } from "../tracker/issue.js";
+import type { Tool } from "../tools/types.js";
+import type { TurnResult } from "../runtime/types.js";
 import type { OrchestratorState } from "./state.js";
 import { normalizeState } from "./state.js";
 
 export interface StartedRun {
   threadId: string;
   stop: () => Promise<void>;
+  workspacePath?: string;
+  prompt?: string;
+  tools?: Tool[];
+  attempt?: number;
+  skillSequence?: string[];
+  run?: (prompt?: string) => Promise<TurnResult>;
 }
 
 export async function dispatchCandidates(opts: {
   state: OrchestratorState;
   issues: Issue[];
   startRun: (issue: Issue) => Promise<StartedRun>;
+  onStarted?: (issue: Issue, started: StartedRun) => void;
 }): Promise<OrchestratorState> {
   for (const issue of sortIssuesForDispatch(opts.issues)) {
     if (!shouldDispatchIssue(issue, opts.state)) continue;
@@ -20,9 +29,16 @@ export async function dispatchCandidates(opts: {
       threadId: started.threadId,
       startedAt: new Date(),
       lastActivityAt: new Date(),
-      stop: started.stop
+      stop: started.stop,
+      attempt: started.attempt,
+      workspacePath: started.workspacePath,
+      prompt: started.prompt,
+      toolNames: started.tools?.map((tool) => tool.name) ?? [],
+      events: [],
+      skillSequence: started.skillSequence
     });
     opts.state.claimed.add(issue.id);
+    opts.onStarted?.(issue, started);
   }
   return opts.state;
 }
@@ -41,10 +57,16 @@ export function shouldDispatchIssue(issue: Issue, state: OrchestratorState): boo
     state.activeStates.has(issueState) &&
     !state.terminalStates.has(issueState) &&
     !todoIssueBlockedByNonTerminal(issue, state) &&
+    retryWindowElapsed(issue, state) &&
     !state.claimed.has(issue.id) &&
     !state.running.has(issue.id) &&
     state.running.size < state.maxConcurrentAgents &&
     stateSlotsAvailable(issue, state);
+}
+
+function retryWindowElapsed(issue: Issue, state: OrchestratorState): boolean {
+  const retry = state.retryAttempts.get(issue.id);
+  return !retry || retry.dueAt.getTime() <= Date.now();
 }
 
 function stateSlotsAvailable(issue: Issue, state: OrchestratorState): boolean {

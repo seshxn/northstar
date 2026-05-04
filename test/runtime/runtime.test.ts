@@ -37,4 +37,27 @@ describe("SPEC 17.5 runtime implementations", () => {
 
     await expect(tools.find((tool) => tool.name === "write_file")?.execute({ path: "../escape.txt", content: "x" }, ctx)).rejects.toThrow(/workspace/i);
   });
+
+  test("Bedrock and Gemini runtime turns report explicit experimental status", async () => {
+    const bedrock = runtimeForConfig({ kind: "bedrock_anthropic", model_id: "anthropic.claude", region: "us-west-2" } as never);
+    const gemini = runtimeForConfig({ kind: "gemini", model: "gemini-2.5-pro", api_key: "key" } as never);
+
+    const bedrockResult = await (await bedrock.startSession({ issue: undefined as never, workspacePath: "/tmp/ws", tools: [] })).runTurn({
+      prompt: "run",
+      issue: undefined as never,
+      tools: [],
+      onEvent: vi.fn(),
+      signal: new AbortController().signal
+    });
+    const geminiResult = await (await gemini.startSession({ issue: undefined as never, workspacePath: "/tmp/ws", tools: [] })).runTurn({
+      prompt: "run",
+      issue: undefined as never,
+      tools: [],
+      onEvent: vi.fn(),
+      signal: new AbortController().signal
+    });
+
+    expect(bedrockResult).toMatchObject({ status: "failed", output: expect.stringContaining("experimental") });
+    expect(geminiResult).toMatchObject({ status: "failed", output: expect.stringContaining("experimental") });
+  });
 });

@@ -17,8 +17,8 @@ class GeminiSession implements Session {
   readonly threadId = randomUUID();
   constructor(private readonly model: string) {}
   async runTurn(opts: RunTurnOpts): Promise<TurnResult> {
-    opts.onEvent({ type: "gemini_turn_started", timestamp: new Date().toISOString(), data: { model: this.model } });
-    return { status: "completed", output: "Gemini runtime harness initialized.", tokens: { input: 0, output: 0, total: 0 } };
+    opts.onEvent({ type: "gemini_experimental_runtime", timestamp: new Date().toISOString(), data: { model: this.model } });
+    return { status: "failed", output: "Gemini runtime is experimental: model execution and tool calling are not implemented yet.", tokens: { input: 0, output: 0, total: 0 } };
   }
   async stop(): Promise<void> {}
 }
