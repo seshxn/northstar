@@ -3,6 +3,7 @@ import { Command } from "commander";
 import { ZodError, type ZodIssue } from "zod";
 import { loadWorkflowFile } from "./workflow/loader.js";
 import { parseWorkflowConfig } from "./workflow/schema.js";
+import { watchWorkflow } from "./workflow/watch.js";
 import { trackerForConfig } from "./tracker/registry.js";
 import { runtimeForConfig } from "./runtime/registry.js";
 import { Orchestrator } from "./orchestrator/orchestrator.js";
@@ -40,7 +41,14 @@ export async function main(argv = process.argv): Promise<void> {
   });
   if (config.server.port != null) {
     await app.listen({ host: config.server.host, port: config.server.port });
-    await service.start();
+    const watcher = watchWorkflow(args.workflowPath, (reloaded) => {
+      orchestrator.setPromptTemplate(reloaded.promptTemplate);
+    });
+    try {
+      await service.start();
+    } finally {
+      await watcher.close();
+    }
   } else {
     await service.refresh();
     await orchestrator.waitForIdle();

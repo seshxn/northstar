@@ -4,13 +4,11 @@ Northstar is a TypeScript orchestration harness for issue-driven coding-agent wo
 
 ## Current Status
 
-This repository is an early implementation, but the core issue-run loop is wired.
+The core issue-run loop is wired. Implemented features:
 
-Implemented today:
-
-- Workflow loading with YAML front matter and strict Liquid prompt rendering.
+- Workflow loading with YAML front matter and Liquid prompt rendering, with hot-reload on file change.
 - Linear and Jira issue normalization, including labels, priorities, branches, and blockers.
-- Runtime adapters for `codex_app_server`, `claude_code`, `bedrock_anthropic`, and `gemini`.
+- Runtime adapters for `codex_app_server`, `claude_code`, `bedrock_anthropic` (Converse API), and `gemini` (generateContent).
 - Workspace lifecycle utilities with contained paths and lifecycle hooks.
 - Optional integration tool contracts for Linear GraphQL, Jira REST, GitHub, Slack, and Confluence.
 - Dispatch ordering, concurrency limits, blocker checks, retries, reconciliation, stalled-run restart, and result snapshots.
@@ -20,66 +18,72 @@ Implemented today:
 - Tracker feedback through comments and optional state transitions.
 - HTTP endpoints and dashboard for state inspection, manual refresh, stop, and retry.
 
-Important gaps:
+Known limitation:
 
-- Bedrock and Gemini runtimes are explicitly experimental and return failed turns until real provider tool loops are implemented.
-- Workflow file watching and SSH workers exist as utilities but are not wired into the CLI service loop yet.
-- Quality gates currently run sequentially in the same runtime session, not as parallel independent agents.
-
-See [docs/GAPS_AND_AGENT_SKILLS.md](docs/GAPS_AND_AGENT_SKILLS.md) for the gap analysis, feature roadmap, and skill-integration plan.
+- Quality gates run sequentially in the same runtime session, not as parallel independent agents. See [ADR-005](docs/decisions/0005-sequential-quality-gates.md) for the rationale.
 
 ## Quick Start
 
-Prerequisites:
+### Prerequisites
 
 - Node.js 22 or newer.
-- Tracker credentials for either Linear or Jira.
-- At least one coding-agent runtime installed and authenticated if you want live agent execution later.
+- Credentials for at least one issue tracker (Linear API key, or Jira email + API token).
+- A coding-agent runtime installed locally if you want live agent execution: Claude Code (`npm install -g @anthropic-ai/claude-code`) or Codex.
 
-Install and verify the project:
+### 1. Install and verify
 
 ```bash
 npm install
 npm run build
 npm test
-npm run spec:check
 ```
 
-Create a workflow file:
+### 2. Create your workflow file
 
 ```bash
 cp WORKFLOW.example.md WORKFLOW.md
 ```
 
-Set the environment variables referenced by your workflow. Common variables are:
+Open `WORKFLOW.md` and edit the YAML front matter to point at your tracker, runtime, and workspace:
+
+- Set `tracker.kind` to `linear` or `jira` and fill in the matching credentials.
+- Set `runtime.kind` to `claude_code` (or `codex_app_server`).
+- Set `workspace.root` to where you want per-issue working directories created (defaults to a temp directory).
+
+Keep credentials as `$ENV_VAR` references — they are resolved at startup, not stored in the file.
+
+### 3. Export your credentials
+
+Set the environment variables referenced by your `WORKFLOW.md`:
 
 | Variable | Used by |
 | --- | --- |
-| `LINEAR_API_KEY` | Linear tracker and Linear GraphQL tool |
-| `JIRA_EMAIL` | Jira tracker and Jira REST tool |
-| `JIRA_API_TOKEN` | Jira tracker and Jira REST tool |
+| `LINEAR_API_KEY` | Linear tracker and Linear GraphQL integration tool |
+| `JIRA_EMAIL` | Jira tracker and Jira REST integration tool |
+| `JIRA_API_TOKEN` | Jira tracker and Jira REST integration tool |
+| `ANTHROPIC_API_KEY` | Claude Code runtime (if not using `claude auth login`) |
 | `GITHUB_TOKEN` | GitHub integration tool |
-| `SLACK_TOKEN` | Slack posting tool |
-| `CONFLUENCE_API_TOKEN` | Confluence page tool |
-| `ANTHROPIC_API_KEY` | Claude Code runtime, depending on local auth setup |
-| `GOOGLE_API_KEY` | Gemini runtime, once the model loop is wired |
-| `AWS_PROFILE` | Bedrock runtime, depending on AWS configuration |
+| `SLACK_TOKEN` | Slack posting integration tool |
+| `CONFLUENCE_API_TOKEN` | Confluence page integration tool |
+| `GOOGLE_API_KEY` | Gemini runtime (experimental) |
+| `AWS_PROFILE` | Bedrock runtime (experimental) |
 
-Run the local service:
+### 4. Run the service
 
 ```bash
-npm run build
 node dist/src/cli.js ./WORKFLOW.md --port 4000
 ```
 
-Open the dashboard at `http://127.0.0.1:4000/`, or inspect state directly:
+Open the dashboard at `http://127.0.0.1:4000/`, or query the state API directly:
 
 ```bash
 curl http://127.0.0.1:4000/api/v1/state
 curl -X POST http://127.0.0.1:4000/api/v1/refresh
 ```
 
-When published or linked as a package, the same CLI is exposed as:
+Omit `--port` to run a single-pass tick (fetch issues, start agent runs, exit when all runs finish) without starting the HTTP server. This is useful for one-shot CI jobs.
+
+Once published or globally linked:
 
 ```bash
 npx northstar ./WORKFLOW.md --port 4000
@@ -136,6 +140,40 @@ Use `policy` to restrict tools globally or by issue label. Label-specific allow 
 Use `feedback` to control tracker comments and optional state transitions. Comments are best-effort, and transitions are skipped for trackers that do not implement `updateIssueState`.
 
 Use `quality_gates` to run extra sequential turns after the implementation turn succeeds. Built-in gate names include `test`, `review`, `security_review`, and `docs`; unknown names are passed through as custom gate prompts.
+
+## Architecture
+
+```
+WORKFLOW.md  →  Orchestrator  →  Tracker (Linear / Jira)
+                     │
+                     ├── Workspace (per-issue directory)
+                     ├── Tool policy filter
+                     ├── Skill profile injector
+                     ├── Runtime (Codex / Claude Code / Bedrock / Gemini)
+                     │       └── Quality gates (sequential turns)
+                     └── Feedback (tracker comments + state transitions)
+
+HTTP server  →  state, refresh, stop, retry endpoints
+Dashboard    →  browser UI consuming the state endpoint
+```
+
+Key modules:
+
+| Module | Purpose |
+| --- | --- |
+| `src/workflow/` | WORKFLOW.md loading, YAML parsing, Liquid prompt rendering |
+| `src/tracker/` | Normalised `Issue` model; Linear and Jira adapters |
+| `src/runtime/` | Runtime interface; Codex, Claude Code, Bedrock, Gemini harnesses |
+| `src/orchestrator/` | Dispatch, state, retry, reconciliation, stall restart |
+| `src/workspace/` | Per-issue directory creation and lifecycle hooks |
+| `src/tools/` | Integration tool contracts and per-runtime spec adapters |
+| `src/skills/` | Skill-sequence resolution and prompt injection |
+| `src/quality/` | Quality gate sequence resolution and prompt construction |
+| `src/policy/` | Tool allow/deny filtering by label |
+| `src/context/` | Deterministic issue-context assembly for prompts |
+| `src/observability/` | HTTP server, dashboard, and result snapshots |
+
+See [docs/decisions/](docs/decisions/) for architecture decision records covering key design choices.
 
 ## Development
 
