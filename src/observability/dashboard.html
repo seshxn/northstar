@@ -101,8 +101,9 @@
           ${metric("Running", state.running.length)}
           ${metric("Completed", state.completed.length)}
           ${metric("Retrying", state.retryAttempts.length)}
-          ${metric("Tokens", state.tokenTotals.total)}
+          ${metric("Awaiting", (state.awaitingReview || []).length)}
           ${table("Running issues", state.running, ["issue", "threadId", "workspacePath", "eventCount"], true)}
+          ${table("Awaiting review", state.awaitingReview || [], ["issue", "title", "updatedAt", "planOutput"], false, reviewActions)}
           ${table("Recent results", state.results || [], ["issue", "status", "attempt", "eventCount", "output"], false)}
           ${table("Retry queue", state.retryAttempts, ["issueId", "attempt", "dueAt"], false)}
         `;
@@ -112,11 +113,12 @@
         return `<section><h2>${escapeHtml(label)}</h2><div class="metric">${escapeHtml(String(value))}</div></section>`;
       }
 
-      function table(title, rows, keys, controls) {
+      function table(title, rows, keys, controls, actionRenderer = actions) {
+        const hasActions = controls || actionRenderer !== actions;
         const body = rows.length === 0
-          ? `<tr><td colspan="${keys.length + (controls ? 1 : 0)}" class="muted">None</td></tr>`
-          : rows.map((row) => `<tr>${keys.map((key) => cell(key, row[key])).join("")}${controls ? actions(row) : ""}</tr>`).join("");
-        return `<section class="wide"><h2>${escapeHtml(title)}</h2><table><thead><tr>${keys.map((key) => `<th>${escapeHtml(key)}</th>`).join("")}${controls ? "<th>Actions</th>" : ""}</tr></thead><tbody>${body}</tbody></table></section>`;
+          ? `<tr><td colspan="${keys.length + (hasActions ? 1 : 0)}" class="muted">None</td></tr>`
+          : rows.map((row) => `<tr>${keys.map((key) => cell(key, row[key])).join("")}${hasActions ? actionRenderer(row) : ""}</tr>`).join("");
+        return `<section class="wide"><h2>${escapeHtml(title)}</h2><table><thead><tr>${keys.map((key) => `<th>${escapeHtml(key)}</th>`).join("")}${hasActions ? "<th>Actions</th>" : ""}</tr></thead><tbody>${body}</tbody></table></section>`;
       }
 
       function cell(key, value) {
@@ -127,6 +129,11 @@
       function actions(row) {
         const id = encodeURIComponent(row.issueId || row.issue);
         return `<td><button class="secondary" onclick="fetch('/api/v1/${id}/stop',{method:'POST'}).then(()=>refresh())">Stop</button></td>`;
+      }
+
+      function reviewActions(row) {
+        const id = encodeURIComponent(row.issueId || row.issue);
+        return `<td><button class="secondary" onclick="fetch('/api/v1/${id}/approve',{method:'POST'}).then(()=>refresh())">Approve</button></td>`;
       }
 
       function escapeHtml(value) {

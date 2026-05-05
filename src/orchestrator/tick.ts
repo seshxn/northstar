@@ -60,6 +60,7 @@ export function shouldDispatchIssue(issue: Issue, state: OrchestratorState): boo
     retryWindowElapsed(issue, state) &&
     !state.claimed.has(issue.id) &&
     !state.running.has(issue.id) &&
+    !state.awaitingReview.has(issue.id) &&
     state.running.size < state.maxConcurrentAgents &&
     stateSlotsAvailable(issue, state);
 }

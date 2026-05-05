@@ -42,6 +42,31 @@ describe("SPEC 17.3 tracker adapters", () => {
     expect(graphql).toHaveBeenCalledTimes(2);
   });
 
+  test("Linear adapter creates and fetches comments", async () => {
+    const calls: Array<{ query: string; variables: Record<string, unknown> }> = [];
+    const graphql = vi.fn(async (query: string, variables: Record<string, unknown>) => {
+      calls.push({ query, variables });
+      if (query.includes("commentCreate")) return { data: { commentCreate: { success: true } } };
+      return {
+        data: {
+          issue: {
+            comments: {
+              nodes: [{ id: "c1", body: "looks good", createdAt: "2026-01-01T00:00:00.000Z", user: { name: "Lead" } }],
+              pageInfo: { hasNextPage: false, endCursor: null }
+            }
+          }
+        }
+      };
+    });
+    const tracker = new LinearTracker({ kind: "linear", endpoint: "https://linear", api_key: "token", project_slug: "SYM", active_states: ["Todo"], terminal_states: ["Done"] }, graphql);
+
+    await tracker.createComment("lin-1", "plan");
+    const comments = await tracker.fetchComments("lin-1");
+
+    expect(calls[0]?.variables).toEqual({ issueId: "lin-1", body: "plan" });
+    expect(comments).toEqual([{ id: "c1", body: "looks good", created_at: "2026-01-01T00:00:00.000Z", author: "Lead" }]);
+  });
+
   test("normalizes Jira status, priority, labels, and outward blockers", () => {
     const issue = normalizeJiraIssue({
       id: "10001",
@@ -76,6 +101,23 @@ describe("SPEC 17.3 tracker adapters", () => {
     expect((await tracker.fetchIssueStatesByIds(["SYM-1"]))[0]?.state).toBe("Todo");
     expect(requests[0]).toContain("/rest/api/3/search");
     expect(requests[1]).toContain("key%20in%20(SYM-1)");
+  });
+
+  test("Jira adapter fetches comments and extracts ADF text", async () => {
+    const request = vi.fn(async () => ({
+      comments: [{
+        id: "100",
+        created: "2026-01-01T00:00:00.000+0000",
+        author: { displayName: "Reviewer" },
+        body: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "/approve" }] }] }
+      }]
+    }));
+    const tracker = new JiraTracker({ kind: "jira", endpoint: "https://jira", email: "dev@example.com", api_token: "token", project_key: "SYM", active_states: ["Todo"], terminal_states: ["Done"] }, request);
+
+    const comments = await tracker.fetchComments("SYM-1");
+
+    expect(comments).toEqual([{ id: "100", body: "/approve", created_at: "2026-01-01T00:00:00.000+0000", author: "Reviewer" }]);
+    expect(request).toHaveBeenCalledWith("/rest/api/3/issue/SYM-1/comment", { method: "GET" });
   });
 
   test("normalizes GitHub issue fields, strips PRs, and maps priority labels", () => {
@@ -137,6 +179,21 @@ describe("SPEC 17.3 tracker adapters", () => {
     expect(requests[0]?.body).toEqual({ body: "done" });
     expect(requests[1]?.method).toBe("PATCH");
     expect(requests[1]?.body).toEqual({ state: "closed" });
+  });
+
+  test("GitHub adapter fetches issue comments", async () => {
+    const request = vi.fn(async () => [{
+      id: 123,
+      body: "/approve",
+      created_at: "2026-01-01T00:00:00Z",
+      user: { login: "lead" }
+    }]);
+    const tracker = new GitHubTracker({ kind: "github", repo: "acme/repo", labels: [], active_states: ["open"], terminal_states: ["closed"] }, request);
+
+    const comments = await tracker.fetchComments("5");
+
+    expect(comments).toEqual([{ id: "123", body: "/approve", created_at: "2026-01-01T00:00:00Z", author: "lead" }]);
+    expect(request).toHaveBeenCalledWith("/repos/acme/repo/issues/5/comments?per_page=100&page=1");
   });
 
   test("GitHub adapter fetchIssuesByStates maps open/closed to GitHub state param", async () => {

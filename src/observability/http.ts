@@ -11,6 +11,8 @@ export function createHttpServer(opts: {
   refresh: () => Promise<void>;
   stopIssue?: (identifier: string) => Promise<boolean>;
   retryIssue?: (identifier: string) => Promise<boolean>;
+  approveIssue?: (identifier: string) => Promise<boolean>;
+  feedbackIssue?: (identifier: string, message: string) => Promise<boolean>;
 }) {
   const app = Fastify({ logger: false });
   app.get("/", async (_request, reply) => reply.type("text/html").send(await loadDashboardHtml()));
@@ -20,6 +22,8 @@ export function createHttpServer(opts: {
     const identifier = decodeURIComponent(request.params.identifier);
     const running = snapshot.running.find((entry) => entry.issue === identifier || entry.issueId === identifier);
     if (running) return running;
+    const awaiting = snapshot.awaitingReview.find((entry) => entry.issue === identifier || entry.issueId === identifier);
+    if (awaiting) return awaiting;
     if (snapshot.completed.includes(identifier)) return { identifier, status: "completed" };
     return reply.code(404).send({ error: "not_found" });
   });
@@ -33,6 +37,20 @@ export function createHttpServer(opts: {
   });
   app.post<{ Params: { identifier: string } }>("/api/v1/:identifier/retry", async (request, reply) => {
     const ok = await opts.retryIssue?.(decodeURIComponent(request.params.identifier));
+    if (!ok) return reply.code(404).send({ error: "not_found" });
+    await opts.refresh();
+    return reply.code(202).send({ ok: true });
+  });
+  app.post<{ Params: { identifier: string } }>("/api/v1/:identifier/approve", async (request, reply) => {
+    const ok = await opts.approveIssue?.(decodeURIComponent(request.params.identifier));
+    if (!ok) return reply.code(404).send({ error: "not_found" });
+    await opts.refresh();
+    return reply.code(202).send({ ok: true });
+  });
+  app.post<{ Params: { identifier: string }; Body: { message?: unknown } }>("/api/v1/:identifier/feedback", async (request, reply) => {
+    const message = typeof request.body?.message === "string" ? request.body.message : "";
+    if (message.trim() === "") return reply.code(400).send({ error: "message_required" });
+    const ok = await opts.feedbackIssue?.(decodeURIComponent(request.params.identifier), message);
     if (!ok) return reply.code(404).send({ error: "not_found" });
     await opts.refresh();
     return reply.code(202).send({ ok: true });

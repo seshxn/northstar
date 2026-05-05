@@ -23,6 +23,18 @@ export function snapshotState(state: OrchestratorState) {
       dueAt: entry.dueAt.toISOString(),
       metadata: entry.metadata
     })),
+    awaitingReview: [...state.awaitingReview.values()].map((entry) => ({
+      issueId: entry.issueId,
+      issue: entry.issue,
+      title: entry.title,
+      workspacePath: entry.workspacePath,
+      planOutput: entry.planOutput,
+      planCommentId: entry.planCommentId,
+      lastProcessedCommentId: entry.lastProcessedCommentId,
+      createdAt: entry.createdAt.toISOString(),
+      updatedAt: entry.updatedAt.toISOString(),
+      attempt: entry.attempt
+    })),
     tokenTotals: state.tokenTotals,
     results: [...state.results.values()].map((entry) => ({
       issueId: entry.issueId,

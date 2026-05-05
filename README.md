@@ -140,6 +140,8 @@ Use `policy` to restrict tools globally or by issue label. Label-specific allow 
 
 Use `feedback` to control tracker comments and optional state transitions. Comments are best-effort, and transitions are skipped for trackers that do not implement `updateIssueState`.
 
+Use `approval_gates` to require a human review loop before implementation. When enabled, matching issues run a planning turn first, Northstar posts the plan to the tracker, stores the awaiting-review state under `workspace.root/.northstar/awaiting-review.json`, and waits for an explicit command. Defaults are `/approve`, `/revise <feedback>`, and `/reject`; `labels` limits the gate to matching issue labels, `awaiting_state` optionally moves the tracker issue while waiting, and `approvers` restricts tracker-command authors that may approve or revise. Dashboard approval and feedback endpoints are available through the local HTTP server.
+
 Use `quality_gates` to run extra sequential turns after the implementation turn succeeds. Built-in gate names include `test`, `review`, `security_review`, and `docs`; unknown names are passed through as custom gate prompts.
 
 ## Architecture

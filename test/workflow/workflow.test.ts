@@ -149,4 +149,28 @@ describe("SPEC 17.1 workflow loading and config", () => {
       }
     });
   });
+
+  test("parses optional human approval gates", () => {
+    const config = parseWorkflowConfig({
+      approval_gates: {
+        enabled: true,
+        labels: ["High-Risk"],
+        awaiting_state: "Awaiting Review",
+        approval_trigger: "/shipit",
+        rejection_trigger: "/nope",
+        revision_trigger: "/change",
+        approvers: ["lead@example.com"]
+      }
+    });
+
+    expect(config.approval_gates).toEqual({
+      enabled: true,
+      labels: ["high-risk"],
+      awaiting_state: "Awaiting Review",
+      approval_trigger: "/shipit",
+      rejection_trigger: "/nope",
+      revision_trigger: "/change",
+      approvers: ["lead@example.com"]
+    });
+  });
 });
