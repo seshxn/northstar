@@ -26,6 +26,15 @@ const jiraTrackerSchema = z.object({
   terminal_states: z.array(z.string()).default(["Done", "Cancelled", "Won't Do"])
 });
 
+const githubTrackerSchema = z.object({
+  kind: z.literal("github"),
+  token: z.string().optional(),
+  repo: z.string(),
+  labels: stringArray.default([]),
+  active_states: z.array(z.string()).default(["open"]),
+  terminal_states: z.array(z.string()).default(["closed"])
+});
+
 const runtimeSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("codex_app_server"),
@@ -102,7 +111,7 @@ const qualityGatesSchema = z.object({
 }).default({});
 
 const workflowSchema = z.object({
-  tracker: z.union([linearTrackerSchema, jiraTrackerSchema]).default({ kind: "linear" }),
+  tracker: z.union([linearTrackerSchema, jiraTrackerSchema, githubTrackerSchema]).default({ kind: "linear" }),
   runtime: runtimeSchema.default({ kind: "codex_app_server" }),
   polling: z.object({ interval_ms: z.number().int().positive().default(30_000) }).default({}),
   workspace: z.object({ root: z.string().optional() }).default({}),

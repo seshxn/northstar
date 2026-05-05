@@ -3,6 +3,8 @@ import { normalizeLinearIssue } from "../../src/tracker/linear/normalize.js";
 import { LinearTracker } from "../../src/tracker/linear/adapter.js";
 import { normalizeJiraIssue } from "../../src/tracker/jira/normalize.js";
 import { JiraTracker } from "../../src/tracker/jira/adapter.js";
+import { normalizeGitHubIssue } from "../../src/tracker/github/normalize.js";
+import { GitHubTracker } from "../../src/tracker/github/adapter.js";
 
 describe("SPEC 17.3 tracker adapters", () => {
   test("normalizes Linear labels, branch metadata, and inverse blocking relations", () => {
@@ -74,5 +76,80 @@ describe("SPEC 17.3 tracker adapters", () => {
     expect((await tracker.fetchIssueStatesByIds(["SYM-1"]))[0]?.state).toBe("Todo");
     expect(requests[0]).toContain("/rest/api/3/search");
     expect(requests[1]).toContain("key%20in%20(SYM-1)");
+  });
+
+  test("normalizes GitHub issue fields, strips PRs, and maps priority labels", () => {
+    const issue = normalizeGitHubIssue({
+      number: 42,
+      title: "Add feature X",
+      body: "Description here",
+      state: "open",
+      html_url: "https://github.com/acme/repo/issues/42",
+      labels: [{ name: "P1" }, { name: "backend" }],
+      assignee: { login: "sesh" },
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-02T00:00:00Z"
+    });
+
+    expect(issue?.id).toBe("42");
+    expect(issue?.identifier).toBe("#42");
+    expect(issue?.state).toBe("open");
+    expect(issue?.labels).toEqual(["p1", "backend"]);
+    expect(issue?.priority).toBe(1);
+    expect(issue?.assignee_id).toBe("sesh");
+    expect(issue?.blocked_by).toEqual([]);
+  });
+
+  test("GitHub normalizer returns null for pull requests (missing number)", () => {
+    expect(normalizeGitHubIssue({ title: "PR", state: "open" })).toBeNull();
+  });
+
+  test("GitHub adapter paginates candidate issues and excludes PRs", async () => {
+    const makeItem = (n: number) => ({ number: n, title: `Issue ${n}`, state: "open", labels: [] });
+    const page1 = [...Array(100)].map((_, i) => makeItem(i + 1));
+    const page2 = [makeItem(101), { number: 102, title: "PR", state: "open", labels: [], pull_request: {} }];
+    let call = 0;
+    const request = vi.fn(async () => (call++ === 0 ? page1 : page2));
+    const tracker = new GitHubTracker({ kind: "github", repo: "acme/repo", labels: [], active_states: ["open"], terminal_states: ["closed"] }, request);
+
+    const issues = await tracker.fetchCandidateIssues();
+
+    expect(issues).toHaveLength(101);
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(issues.find((i) => i.id === "102")).toBeUndefined();
+  });
+
+  test("GitHub adapter creates comment and closes issue via updateIssueState", async () => {
+    const requests: Array<{ path: string; method: string; body?: unknown }> = [];
+    const request = vi.fn(async (path: string, init?: RequestInit) => {
+      requests.push({ path, method: init?.method ?? "GET", body: init?.body ? JSON.parse(init.body as string) : undefined });
+      if (path.includes("/issues/5") && (init?.method ?? "GET") === "GET") {
+        return { number: 5, title: "T", state: "open", labels: [] };
+      }
+      return null;
+    });
+    const tracker = new GitHubTracker({ kind: "github", repo: "acme/repo", labels: [], active_states: ["open"], terminal_states: ["closed"] }, request);
+
+    await tracker.createComment("5", "done");
+    await tracker.updateIssueState("5", "closed");
+
+    expect(requests[0]?.path).toContain("/issues/5/comments");
+    expect(requests[0]?.body).toEqual({ body: "done" });
+    expect(requests[1]?.method).toBe("PATCH");
+    expect(requests[1]?.body).toEqual({ state: "closed" });
+  });
+
+  test("GitHub adapter fetchIssuesByStates maps open/closed to GitHub state param", async () => {
+    const paths: string[] = [];
+    const request = vi.fn(async (path: string) => { paths.push(path); return []; });
+    const tracker = new GitHubTracker({ kind: "github", repo: "acme/repo", labels: [], active_states: ["open"], terminal_states: ["closed"] }, request);
+
+    await tracker.fetchIssuesByStates(["open"]);
+    await tracker.fetchIssuesByStates(["closed"]);
+    await tracker.fetchIssuesByStates(["open", "closed"]);
+
+    expect(paths[0]).toContain("state=open");
+    expect(paths[1]).toContain("state=closed");
+    expect(paths[2]).toContain("state=all");
   });
 });
