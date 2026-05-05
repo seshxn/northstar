@@ -24,7 +24,7 @@ export class Orchestrator {
     private readonly config: NorthstarConfig,
     private readonly tracker: Tracker,
     private readonly runtime: Runtime,
-    private readonly promptTemplate = ""
+    private promptTemplate = ""
   ) {
     this.workspaceManager = new WorkspaceManager({ root: config.workspace.root ?? "", hooks: config.hooks });
     this.state = createInitialState({
@@ -34,6 +34,10 @@ export class Orchestrator {
       terminalStates: config.tracker.terminal_states,
       maxConcurrentAgentsByState: config.agent.max_concurrent_agents_by_state
     });
+  }
+
+  setPromptTemplate(template: string): void {
+    this.promptTemplate = template;
   }
 
   enqueue<T>(operation: () => Promise<T>): Promise<T> {

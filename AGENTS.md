@@ -23,7 +23,7 @@ Before implying provider parity, check the current code path in `src/runtime/`: 
 - `src/policy/`: tool allow/deny filtering.
 - `src/observability/`: HTTP state surface, snapshots, and dashboard.
 - `test/`: Vitest suites mapped to conformance sections.
-- `docs/GAPS_AND_AGENT_SKILLS.md`: current gaps, roadmap ideas, and agent-skill integration plan.
+- `docs/decisions/`: architecture decision records explaining key design choices.
 
 ## Commands
 
