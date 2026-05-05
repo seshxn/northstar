@@ -167,6 +167,8 @@ describe("SPEC 17.4 orchestrator dispatch, retry, and reconcile", () => {
     expect(orchestrator.state.results.get("issue-1")?.events.map((event) => event.type)).toContain("test_event");
     expect(tracker.createComment).toHaveBeenCalledWith("issue-1", expect.stringContaining("Northstar started"));
     expect(tracker.createComment).toHaveBeenCalledWith("issue-1", expect.stringContaining("Northstar completed"));
+    // Exactly two comments: one on first start, one on completion.
+    expect(tracker.createComment).toHaveBeenCalledTimes(2);
   });
 
   test("schedules failed runs for retry and only dispatches them when due", async () => {
@@ -175,7 +177,8 @@ describe("SPEC 17.4 orchestrator dispatch, retry, and reconcile", () => {
     const tracker: Tracker = {
       fetchCandidateIssues: vi.fn(async () => [candidate]),
       fetchIssuesByStates: vi.fn(async () => [candidate]),
-      fetchIssueStatesByIds: vi.fn(async () => [candidate])
+      fetchIssueStatesByIds: vi.fn(async () => [candidate]),
+      createComment: vi.fn(async () => undefined)
     };
     const runTurn = vi
       .fn()
@@ -213,6 +216,10 @@ describe("SPEC 17.4 orchestrator dispatch, retry, and reconcile", () => {
     expect(runTurn).toHaveBeenCalledTimes(2);
     expect(orchestrator.state.retryAttempts.has("issue-retry")).toBe(false);
     expect(orchestrator.state.completed.has("SYM-7")).toBe(true);
+    // Only 2 comments: one on first start, one on eventual completion. No comments during retries.
+    expect(tracker.createComment).toHaveBeenCalledTimes(2);
+    expect(tracker.createComment).toHaveBeenCalledWith("issue-retry", expect.stringContaining("Northstar started"));
+    expect(tracker.createComment).toHaveBeenCalledWith("issue-retry", expect.stringContaining("Northstar completed"));
   });
 
   test("applies tool policy and tracker state transitions during a run", async () => {

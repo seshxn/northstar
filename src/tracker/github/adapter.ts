@@ -1,4 +1,5 @@
 import type { Tracker } from "../types.js";
+import type { TrackerComment } from "../types.js";
 import type { Issue } from "../issue.js";
 import { GitHubClient, type GitHubRequest } from "./client.js";
 import { normalizeGitHubIssue } from "./normalize.js";
@@ -37,12 +38,17 @@ export class GitHubTracker implements Tracker {
     return results.filter((issue): issue is Issue => issue !== null);
   }
 
-  async createComment(issueId: string, body: string): Promise<void> {
-    await this.request(`/repos/${this.config.repo}/issues/${encodeURIComponent(issueId)}/comments`, {
+  async createComment(issueId: string, body: string): Promise<TrackerComment | void> {
+    const response = await this.request(`/repos/${this.config.repo}/issues/${encodeURIComponent(issueId)}/comments`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ body })
     });
+    return normalizeGitHubComment(response) ?? undefined;
+  }
+
+  async fetchComments(issueId: string): Promise<TrackerComment[]> {
+    return this.fetchCommentPage(issueId);
   }
 
   async updateIssueState(issueId: string, stateName: string): Promise<void> {
@@ -79,4 +85,25 @@ export class GitHubTracker implements Tracker {
       return null;
     }
   }
+
+  private async fetchCommentPage(issueId: string, page = 1, acc: TrackerComment[] = []): Promise<TrackerComment[]> {
+    const response = await this.request(`/repos/${this.config.repo}/issues/${encodeURIComponent(issueId)}/comments?per_page=100&page=${page}`);
+    const items = Array.isArray(response) ? response : [];
+    const comments = [...acc, ...items.map(normalizeGitHubComment).filter((comment): comment is TrackerComment => comment !== null)];
+    return items.length === 100 ? this.fetchCommentPage(issueId, page + 1, comments) : comments;
+  }
+}
+
+function normalizeGitHubComment(raw: unknown): TrackerComment | null {
+  if (!raw || typeof raw !== "object") return null;
+  const record = raw as Record<string, unknown>;
+  const id = record.id;
+  if ((typeof id !== "string" && typeof id !== "number") || typeof record.body !== "string" || typeof record.created_at !== "string") return null;
+  const user = record.user && typeof record.user === "object" ? record.user as Record<string, unknown> : {};
+  return {
+    id: String(id),
+    body: record.body,
+    created_at: record.created_at,
+    author: typeof user.login === "string" ? user.login : undefined
+  };
 }

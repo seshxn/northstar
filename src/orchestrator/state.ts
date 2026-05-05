@@ -1,5 +1,6 @@
 import type { Issue } from "../tracker/issue.js";
 import type { RuntimeEvent, TurnResult } from "../runtime/types.js";
+import type { AwaitingReviewEntry } from "./approval-gates.js";
 
 export interface RunningEntry {
   issue: Issue;
@@ -60,6 +61,7 @@ export interface OrchestratorState {
   completed: Set<string>;
   claimed: Set<string>;
   retryAttempts: Map<string, RetryEntry>;
+  awaitingReview: Map<string, AwaitingReviewEntry>;
   tokenTotals: TokenTotals;
   results: Map<string, RunResultEntry>;
 }
@@ -81,6 +83,7 @@ export function createInitialState(opts: {
     completed: new Set(),
     claimed: new Set(),
     retryAttempts: new Map(),
+    awaitingReview: new Map(),
     tokenTotals: { input: 0, output: 0, total: 0 },
     results: new Map()
   };

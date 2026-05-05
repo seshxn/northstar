@@ -37,12 +37,17 @@ export async function main(argv = process.argv): Promise<void> {
     getState: () => orchestrator.state,
     refresh: () => service.refresh(),
     stopIssue: (identifier) => orchestrator.stopIssue(identifier),
-    retryIssue: (identifier) => orchestrator.retryIssue(identifier)
+    retryIssue: (identifier) => orchestrator.retryIssue(identifier),
+    approveIssue: (identifier) => orchestrator.approveIssue(identifier),
+    feedbackIssue: (identifier, message) => orchestrator.feedbackIssue(identifier, message)
   });
   if (config.server.port != null) {
     await app.listen({ host: config.server.host, port: config.server.port });
+    console.log(`Northstar running — dashboard: http://${config.server.host}:${config.server.port}/`);
+    console.log(`Tracker: ${config.tracker.kind}  Runtime: ${config.runtime.kind}  Poll: ${config.polling.interval_ms}ms`);
     const watcher = watchWorkflow(args.workflowPath, (reloaded) => {
       orchestrator.setPromptTemplate(reloaded.promptTemplate);
+      console.log(`Workflow reloaded from ${args.workflowPath}`);
     });
     try {
       await service.start();

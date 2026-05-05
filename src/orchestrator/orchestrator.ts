@@ -13,12 +13,28 @@ import { assembleIssueContext } from "../context/assembler.js";
 import { renderSkillInstructions, skillSequenceForIssue } from "../skills/profile.js";
 import { filterToolsForIssue } from "../policy/tools.js";
 import { qualityGateSequenceForIssue, renderQualityGatePrompt } from "../quality/gates.js";
+import type { TrackerComment } from "../tracker/types.js";
+import {
+  approvalAuthorAllowed,
+  approvalGatesApply,
+  commentsAfter,
+  loadAwaitingReview,
+  parseApprovalCommand,
+  renderExecutionPrompt,
+  renderPlanningPrompt,
+  renderRevisionPrompt,
+  saveAwaitingReview,
+  type AwaitingReviewEntry
+} from "./approval-gates.js";
+
+type RunMode = "implementation" | "planning" | "revision" | "execution";
 
 export class Orchestrator {
   readonly state: OrchestratorState;
   private queue: Promise<unknown> = Promise.resolve();
   private readonly workspaceManager: WorkspaceManager;
   private readonly activeRuns = new Set<Promise<void>>();
+  private awaitingReviewLoaded = false;
 
   constructor(
     private readonly config: NorthstarConfig,
@@ -48,14 +64,18 @@ export class Orchestrator {
 
   tick(): Promise<OrchestratorState> {
     return this.enqueue(async () => {
+      await this.ensureAwaitingReviewLoaded();
       const issues = await this.tracker.fetchCandidateIssues();
+      await this.processAwaitingReview(issues);
       await reconcileRunningIssues(this.state, issues);
       await restartStalledIssues(this.state, new Date(), this.stallTimeoutMs());
       await dispatchCandidates({
         state: this.state,
         issues,
-        startRun: (issue) => this.prepareRun(issue),
-        onStarted: (issue, started) => this.trackRun(issue, started)
+        startRun: (issue) => approvalGatesApply(this.config.approval_gates, issue)
+          ? this.prepareRun(issue, { mode: "planning" })
+          : this.prepareRun(issue, { mode: "implementation" }),
+        onStarted: (issue, started) => this.trackRun(issue, started, approvalGatesApply(this.config.approval_gates, issue) ? "planning" : "implementation")
       });
       return this.state;
     });
@@ -80,6 +100,24 @@ export class Orchestrator {
     return true;
   }
 
+  async approveIssue(identifier: string): Promise<boolean> {
+    await this.ensureAwaitingReviewLoaded();
+    const entry = this.findAwaiting(identifier);
+    if (!entry) return false;
+    const issue = await this.issueForAwaiting(entry);
+    await this.startApprovedRun(issue, entry);
+    return true;
+  }
+
+  async feedbackIssue(identifier: string, message: string): Promise<boolean> {
+    await this.ensureAwaitingReviewLoaded();
+    const entry = this.findAwaiting(identifier);
+    if (!entry || message.trim() === "") return false;
+    const issue = await this.issueForAwaiting(entry);
+    await this.startRevisionRun(issue, entry, message.trim(), `dashboard-${Date.now()}`);
+    return true;
+  }
+
   async retryIssue(identifier: string): Promise<boolean> {
     const issueId = this.findIssueId(identifier);
     if (!issueId) return false;
@@ -89,7 +127,7 @@ export class Orchestrator {
     return true;
   }
 
-  private async prepareRun(issue: Issue): Promise<StartedRun> {
+  private async prepareRun(issue: Issue, opts: { mode: RunMode; promptOverride?: string } = { mode: "implementation" }): Promise<StartedRun> {
     const workspace = await this.workspaceManager.createForIssue(issue);
     await this.workspaceManager.runBeforeRun(workspace.path, issue);
     const tools = filterToolsForIssue(buildTools(this.config), this.config.policy, issue);
@@ -107,7 +145,8 @@ export class Orchestrator {
       }
     });
     const skillInstructions = renderSkillInstructions(skillSequence);
-    const prompt = [renderedPrompt, skillInstructions, context].filter(Boolean).join("\n\n");
+    const basePrompt = [renderedPrompt, skillInstructions, context].filter(Boolean).join("\n\n");
+    const prompt = opts.promptOverride ?? (opts.mode === "planning" ? renderPlanningPrompt(basePrompt) : basePrompt);
     const abortController = new AbortController();
     const session = await this.runtime.startSession({ issue, workspacePath: workspace.path, tools });
     const attempt = this.state.retryAttempts.get(issue.id)?.attempt ?? 1;
@@ -133,14 +172,20 @@ export class Orchestrator {
     };
   }
 
-  private trackRun(issue: Issue, started: StartedRun): void {
-    const run = this.executeRun(issue, started);
+  private trackRun(issue: Issue, started: StartedRun, mode: RunMode): void {
+    const run = this.executeRun(issue, started, mode);
     this.activeRuns.add(run);
     run.finally(() => this.activeRuns.delete(run));
   }
 
-  private async executeRun(issue: Issue, started: StartedRun): Promise<void> {
-    await this.comment(issue.id, `Northstar started ${issue.identifier} in ${started.threadId}.`);
+  private async executeRun(issue: Issue, started: StartedRun, mode: RunMode): Promise<void> {
+    if (mode === "planning" || mode === "revision") {
+      await this.executePlanningRun(issue, started, mode);
+      return;
+    }
+    if ((started.attempt ?? 1) === 1) {
+      await this.comment(issue.id, `Northstar started ${issue.identifier}.`);
+    }
     await this.transition(issue.id, this.config.feedback.transitions.started_state);
     const startedAt = this.state.running.get(issue.id)?.startedAt ?? new Date();
     let result: TurnResult;
@@ -196,9 +241,192 @@ export class Orchestrator {
     this.state.claimed.delete(issue.id);
     if (result.status === "completed") this.state.retryAttempts.delete(issue.id);
     await this.transition(issue.id, result.status === "completed" ? this.config.feedback.transitions.completed_state : this.config.feedback.transitions.failed_state);
-    await this.comment(issue.id, result.status === "completed"
-      ? `Northstar completed ${issue.identifier}.`
-      : `Northstar finished ${issue.identifier} with status ${result.status}.`);
+    // Only comment on definitive outcomes: success, or a failure with no further retry queued.
+    const willRetry = this.state.retryAttempts.has(issue.id);
+    if (result.status === "completed") {
+      await this.comment(issue.id, `Northstar completed ${issue.identifier}.`);
+    } else if (!willRetry) {
+      await this.comment(issue.id, `Northstar finished ${issue.identifier} with status ${result.status}.`);
+    }
+  }
+
+  private async executePlanningRun(issue: Issue, started: StartedRun, mode: "planning" | "revision"): Promise<void> {
+    const startedAt = this.state.running.get(issue.id)?.startedAt ?? new Date();
+    let result: TurnResult;
+    try {
+      result = started.run ? await started.run() : { status: "failed", output: "runtime did not provide a run function" };
+      if (result.tokens) this.addTokens(result.tokens);
+    } catch (error) {
+      result = { status: "failed", output: error instanceof Error ? error.message : String(error) };
+    } finally {
+      if (started.workspacePath) await this.workspaceManager.runAfterRun(started.workspacePath, issue);
+    }
+
+    const running = this.state.running.get(issue.id);
+    if (!running || running.threadId !== started.threadId) return;
+    this.state.running.delete(issue.id);
+    this.state.claimed.delete(issue.id);
+
+    if (result.status !== "completed") {
+      this.scheduleRetry(issue, started, result);
+      this.state.results.set(issue.id, {
+        issueId: issue.id,
+        issue: issue.identifier,
+        threadId: started.threadId,
+        workspacePath: started.workspacePath ?? "",
+        status: result.status,
+        output: result.output,
+        tokens: result.tokens,
+        events: running.events,
+        startedAt,
+        completedAt: new Date(),
+        attempt: started.attempt ?? 1,
+        error: result.status === "failed" ? result.output : undefined,
+        gateResults: []
+      });
+      return;
+    }
+
+    const planOutput = result.output ?? "";
+    const planCommentId = await this.postCommentAndReadId(issue.id, formatPlanComment(issue, planOutput, this.config.approval_gates));
+    const existing = this.state.awaitingReview.get(issue.id);
+    const now = new Date();
+    this.state.awaitingReview.set(issue.id, {
+      issueId: issue.id,
+      issue: issue.identifier,
+      title: issue.title,
+      workspacePath: started.workspacePath ?? existing?.workspacePath ?? "",
+      planOutput,
+      planCommentId,
+      lastProcessedCommentId: mode === "revision" ? existing?.lastProcessedCommentId ?? null : planCommentId,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+      attempt: started.attempt ?? existing?.attempt ?? 1
+    });
+    await this.persistAwaitingReview();
+    await this.transition(issue.id, this.config.approval_gates.awaiting_state);
+  }
+
+  private async processAwaitingReview(candidateIssues: Issue[]): Promise<void> {
+    if (!this.tracker.fetchComments) return;
+    for (const entry of [...this.state.awaitingReview.values()]) {
+      if (this.state.running.has(entry.issueId)) continue;
+      const issue = candidateIssues.find((candidate) => candidate.id === entry.issueId) ?? await this.issueForAwaiting(entry);
+      const comments = await this.tracker.fetchComments(entry.issueId);
+      for (const comment of commentsAfter(comments, entry.lastProcessedCommentId)) {
+        const command = parseApprovalCommand(comment.body, {
+          approvalTrigger: this.config.approval_gates.approval_trigger,
+          rejectionTrigger: this.config.approval_gates.rejection_trigger,
+          revisionTrigger: this.config.approval_gates.revision_trigger
+        });
+        if (!command) continue;
+        entry.lastProcessedCommentId = comment.id;
+        entry.updatedAt = new Date();
+        await this.persistAwaitingReview();
+        if (!approvalAuthorAllowed(comment, this.config.approval_gates.approvers)) continue;
+        if (command.kind === "approve") {
+          await this.startApprovedRun(issue, entry);
+          break;
+        }
+        if (command.kind === "revise") {
+          await this.startRevisionRun(issue, entry, command.message, comment.id);
+          break;
+        }
+        if (command.kind === "reject") {
+          this.state.awaitingReview.delete(entry.issueId);
+          this.state.claimed.delete(entry.issueId);
+          await this.persistAwaitingReview();
+          await this.transition(entry.issueId, this.config.feedback.transitions.failed_state);
+          await this.comment(entry.issueId, `Northstar approval gate rejected ${entry.issue}.`);
+          break;
+        }
+      }
+    }
+  }
+
+  private async startApprovedRun(issue: Issue, entry: AwaitingReviewEntry): Promise<void> {
+    this.state.awaitingReview.delete(entry.issueId);
+    await this.persistAwaitingReview();
+    const basePrompt = await this.basePromptForIssue(issue);
+    const started = await this.prepareRun(issue, { mode: "execution", promptOverride: renderExecutionPrompt(basePrompt, entry.planOutput) });
+    this.registerStartedRun(issue, started);
+    this.trackRun(issue, started, "execution");
+  }
+
+  private async startRevisionRun(issue: Issue, entry: AwaitingReviewEntry, feedback: string, lastProcessedCommentId: string): Promise<void> {
+    entry.lastProcessedCommentId = lastProcessedCommentId;
+    entry.updatedAt = new Date();
+    await this.persistAwaitingReview();
+    const basePrompt = await this.basePromptForIssue(issue);
+    const started = await this.prepareRun(issue, { mode: "revision", promptOverride: renderRevisionPrompt(basePrompt, entry.planOutput, feedback) });
+    this.registerStartedRun(issue, started);
+    this.trackRun(issue, started, "revision");
+  }
+
+  private registerStartedRun(issue: Issue, started: StartedRun): void {
+    this.state.running.set(issue.id, {
+      issue,
+      threadId: started.threadId,
+      startedAt: new Date(),
+      lastActivityAt: new Date(),
+      stop: started.stop,
+      attempt: started.attempt,
+      workspacePath: started.workspacePath,
+      prompt: started.prompt,
+      toolNames: started.tools?.map((tool) => tool.name) ?? [],
+      events: [],
+      skillSequence: started.skillSequence
+    });
+    this.state.claimed.add(issue.id);
+  }
+
+  private async basePromptForIssue(issue: Issue): Promise<string> {
+    const skillSequence = skillSequenceForIssue(this.config.skills, issue);
+    const context = assembleIssueContext({
+      issue,
+      skillSequence,
+      previousResult: this.state.results.get(issue.id)
+    });
+    const renderedPrompt = await renderPrompt(this.promptTemplate, {
+      issue,
+      northstar: {
+        context,
+        skills: skillSequence
+      }
+    });
+    return [renderedPrompt, renderSkillInstructions(skillSequence), context].filter(Boolean).join("\n\n");
+  }
+
+  private async issueForAwaiting(entry: AwaitingReviewEntry): Promise<Issue> {
+    const [fetched] = await this.tracker.fetchIssueStatesByIds([entry.issueId]);
+    return fetched ?? {
+      id: entry.issueId,
+      identifier: entry.issue,
+      title: entry.title,
+      description: null,
+      priority: null,
+      state: this.config.approval_gates.awaiting_state ?? "",
+      branch_name: null,
+      url: null,
+      labels: [],
+      blocked_by: [],
+      created_at: null,
+      updated_at: null
+    };
+  }
+
+  private findAwaiting(identifier: string): AwaitingReviewEntry | null {
+    return [...this.state.awaitingReview.values()].find((entry) => entry.issueId === identifier || entry.issue === identifier) ?? null;
+  }
+
+  private async ensureAwaitingReviewLoaded(): Promise<void> {
+    if (this.awaitingReviewLoaded) return;
+    this.state.awaitingReview = await loadAwaitingReview(this.config.workspace.root ?? "");
+    this.awaitingReviewLoaded = true;
+  }
+
+  private persistAwaitingReview(): Promise<void> {
+    return saveAwaitingReview(this.config.workspace.root ?? "", this.state.awaitingReview);
   }
 
   private recordEvent(issueId: string, event: RuntimeEvent): void {
@@ -222,6 +450,18 @@ export class Orchestrator {
       await this.tracker.createComment?.(issueId, body);
     } catch {
       // Tracker comments are operational feedback; they should not fail the run itself.
+    }
+  }
+
+  private async postCommentAndReadId(issueId: string, body: string): Promise<string | null> {
+    if (!this.config.feedback.comments_enabled) return null;
+    try {
+      const created = await this.tracker.createComment?.(issueId, body);
+      if (created?.id) return created.id;
+      const comments = await this.tracker.fetchComments?.(issueId);
+      return latestMatchingComment(comments ?? [], body)?.id ?? null;
+    } catch {
+      return null;
     }
   }
 
@@ -265,4 +505,19 @@ export class Orchestrator {
   private stallTimeoutMs(): number {
     return "stall_timeout_ms" in this.config.runtime ? this.config.runtime.stall_timeout_ms : 300_000;
   }
+}
+
+function formatPlanComment(issue: Issue, plan: string, config: NorthstarConfig["approval_gates"]): string {
+  return [
+    `Northstar plan for ${issue.identifier}:`,
+    "",
+    plan,
+    "",
+    `Reply with ${config.approval_trigger} to approve, ${config.revision_trigger} <feedback> to request changes, or ${config.rejection_trigger} to reject.`
+  ].join("\n");
+}
+
+function latestMatchingComment(comments: TrackerComment[], body: string): TrackerComment | null {
+  const matches = comments.filter((comment) => comment.body === body || comment.body.includes(body));
+  return matches.at(-1) ?? comments.at(-1) ?? null;
 }

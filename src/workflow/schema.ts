@@ -4,6 +4,7 @@ import { z } from "zod";
 import { deepResolveEnv, resolvePathValue, type ResolveOpts } from "../config/env.js";
 
 const stringArray = z.array(z.string()).default([]);
+const lowerStringArray = z.array(z.string()).default([]).transform((values) => values.map((value) => value.toLowerCase()));
 
 const linearTrackerSchema = z.object({
   kind: z.literal("linear").default("linear"),
@@ -110,6 +111,16 @@ const qualityGatesSchema = z.object({
   label_sequences: z.record(stringArray).default({})
 }).default({});
 
+const approvalGatesSchema = z.object({
+  enabled: z.boolean().default(false),
+  labels: lowerStringArray,
+  awaiting_state: z.string().optional(),
+  approval_trigger: z.string().default("/approve"),
+  rejection_trigger: z.string().default("/reject"),
+  revision_trigger: z.string().default("/revise"),
+  approvers: z.array(z.string()).default([])
+}).default({});
+
 const workflowSchema = z.object({
   tracker: z.union([linearTrackerSchema, jiraTrackerSchema, githubTrackerSchema]).default({ kind: "linear" }),
   runtime: runtimeSchema.default({ kind: "codex_app_server" }),
@@ -133,6 +144,7 @@ const workflowSchema = z.object({
   server: z.object({ port: z.number().int().nonnegative().optional(), host: z.string().default("127.0.0.1") }).default({}),
   skills: skillsSchema,
   quality_gates: qualityGatesSchema,
+  approval_gates: approvalGatesSchema,
   policy: policySchema,
   feedback: feedbackSchema,
   integrations: integrationSchema
