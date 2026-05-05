@@ -1,4 +1,23 @@
 ---
+# Tracker options — uncomment one block and remove the others.
+#
+# GitHub Issues:
+# tracker:
+#   kind: github
+#   token: $GITHUB_TOKEN
+#   repo: owner/repo
+#   labels: []                          # optional: filter to issues with these labels
+#   active_states: [open]
+#   terminal_states: [closed]
+#
+# Linear:
+# tracker:
+#   kind: linear
+#   api_key: $LINEAR_API_KEY
+#   project_slug: my-project
+#   active_states: ["Todo", "In Progress"]
+#   terminal_states: ["Done", "Cancelled"]
+
 tracker:
   kind: jira
   endpoint: https://acme.atlassian.net

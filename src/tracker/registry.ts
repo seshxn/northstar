@@ -2,7 +2,10 @@ import type { NorthstarConfig } from "../workflow/schema.js";
 import type { Tracker } from "./types.js";
 import { LinearTracker } from "./linear/adapter.js";
 import { JiraTracker } from "./jira/adapter.js";
+import { GitHubTracker } from "./github/adapter.js";
 
 export function trackerForConfig(config: NorthstarConfig): Tracker {
-  return config.tracker.kind === "jira" ? new JiraTracker(config.tracker) : new LinearTracker(config.tracker);
+  if (config.tracker.kind === "jira") return new JiraTracker(config.tracker);
+  if (config.tracker.kind === "github") return new GitHubTracker(config.tracker);
+  return new LinearTracker(config.tracker);
 }

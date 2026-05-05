@@ -1,13 +1,13 @@
 # Northstar
 
-Northstar is a TypeScript orchestration harness for issue-driven coding-agent workflows. It loads a Markdown workflow, polls Linear or Jira, runs per-issue agent sessions in isolated workspaces, and exposes an operator dashboard plus HTTP status API.
+Northstar is a TypeScript orchestration harness for issue-driven coding-agent workflows. It loads a Markdown workflow, polls Linear, Jira, or GitHub Issues, runs per-issue agent sessions in isolated workspaces, and exposes an operator dashboard plus HTTP status API.
 
 ## Current Status
 
 The core issue-run loop is wired. Implemented features:
 
 - Workflow loading with YAML front matter and Liquid prompt rendering, with hot-reload on file change.
-- Linear and Jira issue normalization, including labels, priorities, branches, and blockers.
+- Linear, Jira, and GitHub Issues normalization, including labels, priorities, branches, and blockers.
 - Runtime adapters for `codex_app_server`, `claude_code`, `bedrock_anthropic` (Converse API), and `gemini` (generateContent).
 - Workspace lifecycle utilities with contained paths and lifecycle hooks.
 - Optional integration tool contracts for Linear GraphQL, Jira REST, GitHub, Slack, and Confluence.
@@ -27,7 +27,7 @@ Known limitation:
 ### Prerequisites
 
 - Node.js 22 or newer.
-- Credentials for at least one issue tracker (Linear API key, or Jira email + API token).
+- Credentials for at least one issue tracker (Linear API key, Jira email + API token, or GitHub personal access token).
 - A coding-agent runtime installed locally if you want live agent execution: Claude Code (`npm install -g @anthropic-ai/claude-code`) or Codex.
 
 ### 1. Install and verify
@@ -46,7 +46,7 @@ cp WORKFLOW.example.md WORKFLOW.md
 
 Open `WORKFLOW.md` and edit the YAML front matter to point at your tracker, runtime, and workspace:
 
-- Set `tracker.kind` to `linear` or `jira` and fill in the matching credentials.
+- Set `tracker.kind` to `linear`, `jira`, or `github` and fill in the matching credentials.
 - Set `runtime.kind` to `claude_code` (or `codex_app_server`).
 - Set `workspace.root` to where you want per-issue working directories created (defaults to a temp directory).
 
@@ -62,7 +62,7 @@ Set the environment variables referenced by your `WORKFLOW.md`:
 | `JIRA_EMAIL` | Jira tracker and Jira REST integration tool |
 | `JIRA_API_TOKEN` | Jira tracker and Jira REST integration tool |
 | `ANTHROPIC_API_KEY` | Claude Code runtime (if not using `claude auth login`) |
-| `GITHUB_TOKEN` | GitHub integration tool |
+| `GITHUB_TOKEN` | GitHub tracker and GitHub integration tool |
 | `SLACK_TOKEN` | Slack posting integration tool |
 | `CONFLUENCE_API_TOKEN` | Confluence page integration tool |
 | `GOOGLE_API_KEY` | Gemini runtime (experimental) |
@@ -115,6 +115,7 @@ Tracker selection is configured through `tracker.kind`.
 | --- | --- |
 | `linear` | Uses Linear GraphQL, active and terminal state filters, project/assignee filters, pagination, and blocker normalization. |
 | `jira` | Uses Atlassian Cloud REST v3 with endpoint, email, API token, project key, optional JQL, active states, and terminal states. |
+| `github` | Uses GitHub REST API v3. Polls open/closed issues from a single `owner/repo`, with optional label filtering. State model is binary (`open`/`closed`); priority is inferred from labels (`P0`–`P3` or `priority: *`). Pull requests are excluded automatically. |
 
 ## Agent Skill Workflows
 
@@ -144,7 +145,7 @@ Use `quality_gates` to run extra sequential turns after the implementation turn 
 ## Architecture
 
 ```
-WORKFLOW.md  →  Orchestrator  →  Tracker (Linear / Jira)
+WORKFLOW.md  →  Orchestrator  →  Tracker (Linear / Jira / GitHub)
                      │
                      ├── Workspace (per-issue directory)
                      ├── Tool policy filter
@@ -162,7 +163,7 @@ Key modules:
 | Module | Purpose |
 | --- | --- |
 | `src/workflow/` | WORKFLOW.md loading, YAML parsing, Liquid prompt rendering |
-| `src/tracker/` | Normalised `Issue` model; Linear and Jira adapters |
+| `src/tracker/` | Normalised `Issue` model; Linear, Jira, and GitHub Issues adapters |
 | `src/runtime/` | Runtime interface; Codex, Claude Code, Bedrock, Gemini harnesses |
 | `src/orchestrator/` | Dispatch, state, retry, reconciliation, stall restart |
 | `src/workspace/` | Per-issue directory creation and lifecycle hooks |
