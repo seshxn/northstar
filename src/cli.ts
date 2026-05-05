@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { Command } from "commander";
+import { ZodError, type ZodIssue } from "zod";
 import { loadWorkflowFile } from "./workflow/loader.js";
 import { parseWorkflowConfig } from "./workflow/schema.js";
 import { trackerForConfig } from "./tracker/registry.js";
@@ -55,12 +56,44 @@ export function handleCliError(error: unknown): void {
     process.exitCode = 0;
     return;
   }
-  console.error(error instanceof Error ? error.message : error);
+  console.error(formatCliError(error));
   process.exitCode = 1;
+}
+
+export function formatCliError(error: unknown): string {
+  if (error instanceof ZodError) return formatWorkflowValidationError(error);
+  return error instanceof Error ? error.message : String(error);
 }
 
 function isCommanderExpectedExit(error: unknown): boolean {
   if (!error || typeof error !== "object") return false;
   const record = error as { code?: unknown; exitCode?: unknown };
   return typeof record.code === "string" && record.code.startsWith("commander.") && record.exitCode === 0;
+}
+
+function formatWorkflowValidationError(error: ZodError): string {
+  const issues = flattenZodIssues(error);
+  const required = issues.filter((issue) => issue.code === "invalid_type" && "received" in issue && issue.received === "undefined");
+  const selected = required.length > 0 ? required : issues;
+  const lines = selected.map((issue) => {
+    const path = issue.path.length > 0 ? issue.path.join(".") : "workflow";
+    if (issue.code === "invalid_type" && "received" in issue && issue.received === "undefined") return `- ${path} is required`;
+    return `- ${path}: ${issue.message}`;
+  });
+  return [
+    "Invalid workflow configuration.",
+    ...dedupe(lines),
+    "Set the referenced environment variables or edit WORKFLOW.md, then rerun the command."
+  ].join("\n");
+}
+
+function flattenZodIssues(error: ZodError): ZodIssue[] {
+  return error.issues.flatMap((issue) => {
+    if (issue.code === "invalid_union") return issue.unionErrors.flatMap((unionError) => flattenZodIssues(unionError));
+    return [issue];
+  });
+}
+
+function dedupe(values: string[]): string[] {
+  return [...new Set(values)];
 }
