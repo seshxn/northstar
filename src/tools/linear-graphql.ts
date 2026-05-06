@@ -21,7 +21,12 @@ export class LinearGraphqlTool implements Tool {
   async execute(args: unknown, _ctx: ToolContext): Promise<ToolResult> {
     const { query, variables } = normalizeArgs(args);
     const response = await (this.opts.request ?? this.defaultRequest.bind(this))(query, variables);
-    const hasErrors = Boolean(response && typeof response === "object" && Array.isArray((response as { errors?: unknown[] }).errors) && (response as { errors?: unknown[] }).errors!.length > 0);
+    const hasErrors = Boolean(
+      response &&
+      typeof response === "object" &&
+      Array.isArray((response as { errors?: unknown[] }).errors) &&
+      (response as { errors?: unknown[] }).errors!.length > 0
+    );
     return jsonResult(response, !hasErrors);
   }
 
@@ -37,7 +42,7 @@ export class LinearGraphqlTool implements Tool {
   }
 }
 
-function normalizeArgs(args: unknown): { query: string; variables: Record<string, unknown> } {
+const normalizeArgs = (args: unknown): { query: string; variables: Record<string, unknown> } => {
   if (typeof args === "string" && args.trim()) return { query: args.trim(), variables: {} };
   if (!args || typeof args !== "object") throw new Error("linear_graphql expects a query string or object");
   const record = args as Record<string, unknown>;
@@ -46,4 +51,4 @@ function normalizeArgs(args: unknown): { query: string; variables: Record<string
     throw new Error("linear_graphql variables must be an object");
   }
   return { query: record.query.trim(), variables: (record.variables as Record<string, unknown> | undefined) ?? {} };
-}
+};

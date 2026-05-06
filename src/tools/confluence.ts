@@ -8,7 +8,9 @@ export class ConfluencePageTool implements Tool {
   readonly description = "Get, create, update, or search Confluence pages.";
   readonly inputSchema = { type: "object", required: ["op"], additionalProperties: true };
 
-  constructor(private readonly opts: { baseUrl: string; email?: string; apiToken?: string; defaultSpace?: string; request?: ConfluenceRequest }) {}
+  constructor(
+    private readonly opts: { baseUrl: string; email?: string; apiToken?: string; defaultSpace?: string; request?: ConfluenceRequest }
+  ) {}
 
   async execute(args: unknown, _ctx: ToolContext): Promise<ToolResult> {
     if (!args || typeof args !== "object") throw new Error("confluence_page expects an object");
@@ -18,11 +20,24 @@ export class ConfluencePageTool implements Tool {
       case "get":
         return jsonResult(await request(`/api/v2/pages/${input.id}`, { method: "GET", headers: this.headers() }));
       case "search":
-        return jsonResult(await request(`/wiki/rest/api/search?cql=${encodeURIComponent(String(input.cql ?? ""))}`, { method: "GET", headers: this.headers() }));
+        return jsonResult(
+          await request(`/wiki/rest/api/search?cql=${encodeURIComponent(String(input.cql ?? ""))}`, {
+            method: "GET",
+            headers: this.headers()
+          })
+        );
       case "create":
-        return jsonResult(await request("/api/v2/pages", { method: "POST", headers: this.headers(), body: JSON.stringify({ spaceId: input.spaceId ?? this.opts.defaultSpace, title: input.title, body: input.body }) }));
+        return jsonResult(
+          await request("/api/v2/pages", {
+            method: "POST",
+            headers: this.headers(),
+            body: JSON.stringify({ spaceId: input.spaceId ?? this.opts.defaultSpace, title: input.title, body: input.body })
+          })
+        );
       case "update":
-        return jsonResult(await request(`/api/v2/pages/${input.id}`, { method: "PUT", headers: this.headers(), body: JSON.stringify(input.page ?? input) }));
+        return jsonResult(
+          await request(`/api/v2/pages/${input.id}`, { method: "PUT", headers: this.headers(), body: JSON.stringify(input.page ?? input) })
+        );
       default:
         throw new Error(`unsupported confluence op: ${String(input.op)}`);
     }
@@ -36,7 +51,8 @@ export class ConfluencePageTool implements Tool {
 
   private headers(): Record<string, string> {
     const headers: Record<string, string> = { accept: "application/json", "content-type": "application/json" };
-    if (this.opts.email && this.opts.apiToken) headers.authorization = `Basic ${Buffer.from(`${this.opts.email}:${this.opts.apiToken}`).toString("base64")}`;
+    if (this.opts.email && this.opts.apiToken)
+      headers.authorization = `Basic ${Buffer.from(`${this.opts.email}:${this.opts.apiToken}`).toString("base64")}`;
     return headers;
   }
 }

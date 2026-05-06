@@ -16,7 +16,7 @@ const skillInstructions: Record<string, string> = {
   ship: "Prepare a clean handoff with tests, docs, and rollback-relevant notes."
 };
 
-export function skillSequenceForIssue(config: SkillsConfig, issue: Pick<Issue, "labels">): string[] {
+export const skillSequenceForIssue = (config: SkillsConfig, issue: Pick<Issue, "labels">): string[] => {
   if (!config.enabled) return [];
   const sequence: string[] = [];
   for (const skill of config.default_sequence) pushUnique(sequence, skill);
@@ -24,16 +24,18 @@ export function skillSequenceForIssue(config: SkillsConfig, issue: Pick<Issue, "
     for (const skill of config.label_sequences[label.toLowerCase()] ?? []) pushUnique(sequence, skill);
   }
   return sequence;
-}
+};
 
-export function renderSkillInstructions(sequence: string[]): string {
+export const renderSkillInstructions = (sequence: string[]): string => {
   if (sequence.length === 0) return "";
   return [
     "Northstar requested skill gates for this issue:",
-    ...sequence.map((skill) => `- ${skill}: ${skillInstructions[skill] ?? `Follow the locally installed ${skill} skill workflow if available.`}`)
+    ...sequence.map(
+      (skill) => `- ${skill}: ${skillInstructions[skill] ?? `Follow the locally installed ${skill} skill workflow if available.`}`
+    )
   ].join("\n");
-}
+};
 
-function pushUnique(values: string[], value: string): void {
+const pushUnique = (values: string[], value: string): void => {
   if (!values.includes(value)) values.push(value);
-}
+};

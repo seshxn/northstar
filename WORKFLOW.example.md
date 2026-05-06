@@ -30,6 +30,7 @@ tracker:
 runtime:
   kind: claude_code
   model: claude-opus-4-7
+  planning_model: claude-opus-4-7
   api_key: $ANTHROPIC_API_KEY
   approval_policy: auto
 
@@ -44,6 +45,64 @@ agent:
 server:
   host: 127.0.0.1
   port: 4000
+
+board:
+  columns:
+    - id: todo
+      title: Todo
+      tracker_states: ["To Do"]
+      starts_agent: false
+    - id: in-progress
+      title: In Progress
+      tracker_states: ["In Progress"]
+      starts_agent: true
+    - id: planning
+      title: Planning
+      runtime_states: ["planning"]
+    - id: human-review
+      title: Human Review
+      tracker_states: ["Human Review"]
+      runtime_states: ["awaiting_review"]
+    - id: implementing
+      title: Implementing
+      runtime_states: ["implementation", "execution"]
+    - id: retrying
+      title: Retrying
+      runtime_states: ["retrying"]
+    - id: review
+      title: Review
+      tracker_states: ["Review"]
+      runtime_states: ["completed"]
+    - id: blocked
+      title: Blocked
+      tracker_states: ["Blocked"]
+      runtime_states: ["failed"]
+
+pull_request:
+  enabled: true
+  provider: github
+  repo: openai/northstar
+  token: $GITHUB_TOKEN
+  base_branch: main
+  draft: true
+  labels: ["northstar", "agent-generated"]
+  labels_by_issue_label:
+    security: ["security-review-required"]
+    docs: ["documentation"]
+  reviewers: []
+  title_template: "{{ issue.identifier }}: {{ issue.title }}"
+  body_template: |
+    ## Summary
+
+    {{ northstar.summary }}
+
+    ## Approved Plan
+
+    {{ northstar.approved_plan }}
+
+    ## Verification
+
+    {{ northstar.verification }}
 
 skills:
   enabled: true
@@ -85,6 +144,7 @@ integrations:
   slack:
     enabled: false
 ---
+
 You are working on {{ issue.identifier }}: {{ issue.title }}.
 
 Issue URL: {{ issue.url | default: "not provided" }}

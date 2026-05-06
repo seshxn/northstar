@@ -6,11 +6,9 @@ export interface WorkflowDefinition {
   promptTemplate: string;
 }
 
-export async function loadWorkflowFile(path: string): Promise<WorkflowDefinition> {
-  return parseWorkflow(await readFile(path, "utf8"));
-}
+export const loadWorkflowFile = async (path: string): Promise<WorkflowDefinition> => parseWorkflow(await readFile(path, "utf8"));
 
-export function parseWorkflow(source: string): WorkflowDefinition {
+export const parseWorkflow = (source: string): WorkflowDefinition => {
   const normalized = source.replace(/^\uFEFF/, "");
   const match = normalized.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
   if (!match) {
@@ -21,4 +19,4 @@ export function parseWorkflow(source: string): WorkflowDefinition {
     throw new Error("workflow front matter must decode to a map");
   }
   return { config: config as Record<string, unknown>, promptTemplate: match[2].trim() };
-}
+};

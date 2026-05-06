@@ -1,34 +1,65 @@
 # Northstar
 
-Northstar is a TypeScript orchestration harness for issue-driven coding-agent workflows. It loads a Markdown workflow, polls Linear, Jira, or GitHub Issues, runs per-issue agent sessions in isolated workspaces, and exposes an operator dashboard plus HTTP status API.
+**Northstar is a local control plane for issue-driven coding-agent work.**
 
-## Current Status
+It watches Linear, Jira, or GitHub Issues, starts agent runs in isolated workspaces, injects the right workflow guidance, records telemetry, and gives humans a dashboard for review, retries, stop controls, dependency scans, and PR handoff.
 
-The core issue-run loop is wired. Implemented features:
+<p align="center">
+  <img src="docs/assets/northstar-dashboard.svg" alt="Northstar operator dashboard showing metrics, review state, telemetry, and the tracker-to-agent control loop" width="100%" />
+</p>
 
-- Workflow loading with YAML front matter and Liquid prompt rendering, with hot-reload on file change.
-- Linear, Jira, and GitHub Issues normalization, including labels, priorities, branches, and blockers.
-- Runtime adapters for `codex_app_server`, `claude_code`, `bedrock_anthropic` (Converse API), and `gemini` (generateContent).
-- Workspace lifecycle utilities with contained paths and lifecycle hooks.
-- Optional integration tool contracts for Linear GraphQL, Jira REST, GitHub, Slack, and Confluence.
-- Dispatch ordering, concurrency limits, blocker checks, retries, reconciliation, stalled-run restart, and result snapshots.
-- Prompt-level skill profiles with label-driven sequences.
-- Sequential quality gates for test, review, security, docs, or custom gate prompts.
-- Tool policies for global and label-specific allow/deny rules.
-- Tracker feedback through comments and optional state transitions.
-- HTTP endpoints and dashboard for state inspection, manual refresh, stop, and retry.
+## Why Northstar
 
-Known limitation:
+Coding agents are most useful when the work queue, runtime behavior, and handoff path are explicit. Northstar turns an issue tracker into an agent operations system:
 
-- Quality gates run sequentially in the same runtime session, not as parallel independent agents. See [ADR-005](docs/decisions/0005-sequential-quality-gates.md) for the rationale.
+- **Dispatch from real issues** - normalize Linear, Jira, or GitHub Issues into a consistent work model.
+- **Run in contained workspaces** - create per-issue directories, lifecycle hooks, and scoped tool access.
+- **Keep humans in the loop** - require plan approval, request revisions, reject runs, and post feedback back to the tracker.
+- **See what happened** - inspect audit events, token usage, tool names, runtime status, and result snapshots.
+- **Ship the output** - create or reuse GitHub pull requests with configured labels, reviewers, draft mode, and branch metadata.
+
+Northstar is not a hosted agent platform. It is a TypeScript CLI and local HTTP dashboard that coordinates the runtimes, credentials, and repositories you already control.
+
+## What It Does
+
+```text
+Issue tracker      WORKFLOW.md          Agent runtime
+Linear             YAML config          Codex app server
+Jira        -->    Liquid prompt   -->   Claude Code
+GitHub            Skill profiles        Bedrock / Gemini experiments
+                   Tool policy
+                   Quality gates
+                         |
+                         v
+               Isolated workspace
+                         |
+                         v
+             Dashboard, audit trail, PR handoff
+```
+
+Core capabilities:
+
+- Workflow loading with YAML front matter, Liquid prompt rendering, and hot reload.
+- Tracker adapters for Linear, Jira, and GitHub Issues.
+- Runtime adapters for Codex, Claude Code, Bedrock Anthropic, and Gemini.
+- Dispatch ordering, concurrency limits, blocker checks, retries, reconciliation, and stalled-run restart.
+- Prompt-level skill profiles selected globally or by issue label.
+- Sequential quality gates for test, review, security, docs, or custom prompts.
+- Tool policies with global and label-specific allow/deny rules.
+- Approval gates with `/approve`, `/revise <feedback>`, and `/reject` tracker commands.
+- Local React dashboard with Dashboard, Board, Runs, PRs, Activity, and Settings views.
+- Drag-and-drop board moves for tracker-backed columns that allow manual movement.
+- Audit trail, token telemetry, event streams, and runtime status surfaced through HTTP APIs.
+- Optional LLM dependency scan across open issues.
+- In-memory settings updates for runtime models and Jira JQL while the service is running.
 
 ## Quick Start
 
 ### Prerequisites
 
 - Node.js 22 or newer.
-- Credentials for at least one issue tracker (Linear API key, Jira email + API token, or GitHub personal access token).
-- A coding-agent runtime installed locally if you want live agent execution: Claude Code (`npm install -g @anthropic-ai/claude-code`) or Codex.
+- Credentials for at least one tracker: Linear, Jira, or GitHub.
+- A local coding-agent runtime for live execution, such as Claude Code or Codex.
 
 ### 1. Install and verify
 
@@ -38,50 +69,56 @@ npm run build
 npm test
 ```
 
-### 2. Create your workflow file
+### 2. Create a workflow
 
 ```bash
 cp WORKFLOW.example.md WORKFLOW.md
 ```
 
-Open `WORKFLOW.md` and edit the YAML front matter to point at your tracker, runtime, and workspace:
+Edit the YAML front matter in `WORKFLOW.md`:
 
-- Set `tracker.kind` to `linear`, `jira`, or `github` and fill in the matching credentials.
-- Set `runtime.kind` to `claude_code` (or `codex_app_server`).
-- Set `workspace.root` to where you want per-issue working directories created (defaults to a temp directory).
+- Set `tracker.kind` to `linear`, `jira`, or `github`.
+- Set `runtime.kind` to `claude_code`, `codex_app_server`, `bedrock_anthropic`, or `gemini`.
+- Set `workspace.root` to the parent directory for per-issue workspaces.
+- Keep credentials as `$ENV_VAR` references. Northstar resolves them at startup.
 
-Keep credentials as `$ENV_VAR` references — they are resolved at startup, not stored in the file.
+### 3. Export credentials
 
-### 3. Export your credentials
-
-Set the environment variables referenced by your `WORKFLOW.md`:
+Set only the variables your selected tracker, runtime, and integrations use.
 
 | Variable | Used by |
 | --- | --- |
 | `LINEAR_API_KEY` | Linear tracker and Linear GraphQL integration tool |
 | `JIRA_EMAIL` | Jira tracker and Jira REST integration tool |
 | `JIRA_API_TOKEN` | Jira tracker and Jira REST integration tool |
-| `ANTHROPIC_API_KEY` | Claude Code runtime (if not using `claude auth login`) |
-| `GITHUB_TOKEN` | GitHub tracker and GitHub integration tool |
+| `GITHUB_TOKEN` | GitHub tracker, GitHub integration tool, and PR handoff |
+| `ANTHROPIC_API_KEY` | Claude Code runtime when not using local auth |
+| `GOOGLE_API_KEY` | Gemini runtime |
+| `AWS_PROFILE` | Bedrock runtime |
 | `SLACK_TOKEN` | Slack posting integration tool |
 | `CONFLUENCE_API_TOKEN` | Confluence page integration tool |
-| `GOOGLE_API_KEY` | Gemini runtime (experimental) |
-| `AWS_PROFILE` | Bedrock runtime (experimental) |
 
-### 4. Run the service
+### 4. Run Northstar
 
 ```bash
 node dist/src/cli.js ./WORKFLOW.md --port 4000
 ```
 
-Open the dashboard at `http://127.0.0.1:4000/`, or query the state API directly:
+Open the dashboard:
+
+```text
+http://127.0.0.1:4000/
+```
+
+Or call the API directly:
 
 ```bash
 curl http://127.0.0.1:4000/api/v1/state
+curl http://127.0.0.1:4000/api/v1/board
 curl -X POST http://127.0.0.1:4000/api/v1/refresh
 ```
 
-Omit `--port` to run a single-pass tick (fetch issues, start agent runs, exit when all runs finish) without starting the HTTP server. This is useful for one-shot CI jobs.
+Omit `--port` for a single-pass tick that fetches issues, starts eligible runs, and exits when the active work finishes.
 
 Once published or globally linked:
 
@@ -89,94 +126,136 @@ Once published or globally linked:
 npx northstar ./WORKFLOW.md --port 4000
 ```
 
+## Try The Dashboard With Mock Data
+
+For UI development or a quick product tour, run the mock API and Vite dashboard in separate terminals:
+
+```bash
+npm run dev:mock
+npm run dev:web
+```
+
+`npm run dev:mock` serves realistic fixture data on `http://127.0.0.1:4000`, including running agents, an awaiting-review plan, completed and failed runs, PR candidates, telemetry, and audit events. `npm run dev:web` starts the React dashboard and proxies API requests to that mock server.
+
 ## Workflow Files
 
-`WORKFLOW.md` has YAML front matter followed by a Liquid prompt template. The YAML config selects the tracker, runtime, workspace root, concurrency, hooks, server settings, and integrations. The Markdown body is rendered with an `issue` object before it is sent to the runtime.
-Northstar also appends generated issue context and configured skill-gate instructions to the rendered prompt.
+`WORKFLOW.md` has YAML front matter followed by a Markdown prompt template. The YAML config selects trackers, runtimes, workspace behavior, server settings, board columns, integrations, skill profiles, policy, feedback, approval gates, and quality gates.
 
-Start from [WORKFLOW.example.md](WORKFLOW.example.md). Keep credentials as `$ENV_VAR` references so secrets are resolved at runtime instead of written to disk.
+The Markdown body is rendered with Liquid and receives an `issue` object. Northstar appends deterministic issue context plus configured skill and gate instructions before sending the prompt to the selected runtime.
+
+Start with [WORKFLOW.example.md](WORKFLOW.example.md).
 
 ## Runtime Support
 
-Runtime selection is configured through `runtime.kind`.
+Runtime selection is configured with `runtime.kind`.
 
 | Runtime kind | Current behavior |
 | --- | --- |
-| `codex_app_server` | Spawns the configured Codex app-server command when `runTurn()` is called. |
-| `claude_code` | Spawns the local `claude` CLI with stream JSON output when `runTurn()` is called. |
-| `bedrock_anthropic` | Experimental. Returns a failed turn explaining that provider model execution is not implemented yet. |
-| `gemini` | Experimental. Returns a failed turn explaining that provider model execution is not implemented yet. |
+| `codex_app_server` | Runs the configured Codex app-server command for each turn. |
+| `claude_code` | Runs the local `claude` CLI with stream JSON output. |
+| `bedrock_anthropic` | Experimental SDK harness using Bedrock Converse and Northstar tool specs. |
+| `gemini` | Experimental SDK harness using `generateContent` and Northstar tool specs. |
+
+Codex and Claude Code are the most mature paths. Treat Bedrock and Gemini as experimental until you have verified them with your model, tools, and workspace policy.
 
 ## Tracker Support
 
-Tracker selection is configured through `tracker.kind`.
+Tracker selection is configured with `tracker.kind`.
 
 | Tracker kind | Notes |
 | --- | --- |
-| `linear` | Uses Linear GraphQL, active and terminal state filters, project/assignee filters, pagination, and blocker normalization. |
+| `linear` | Uses Linear GraphQL, active and terminal state filters, project and assignee filters, pagination, and blocker normalization. |
 | `jira` | Uses Atlassian Cloud REST v3 with endpoint, email, API token, project key, optional JQL, active states, and terminal states. |
-| `github` | Uses GitHub REST API v3. Polls open/closed issues from a single `owner/repo`, with optional label filtering. State model is binary (`open`/`closed`); priority is inferred from labels (`P0`–`P3` or `priority: *`). Pull requests are excluded automatically. |
+| `github` | Uses GitHub REST API v3 for issues in one `owner/repo`, with optional label filtering. Pull requests are excluded automatically. |
 
-## Agent Skill Workflows
+## Human Review And Quality Gates
 
-Northstar supports prompt-level skill profiles through the `skills` workflow block. It does not vendor or execute skill packs itself; it asks the selected coding agent to follow matching local skills.
+Northstar can keep implementation behind an explicit human review loop:
 
-Good default sequence for coding-agent runs:
+1. A matching issue runs a planning turn.
+2. Northstar posts or stores the plan.
+3. The issue waits for `/approve`, `/revise <feedback>`, or `/reject`.
+4. Approved plans continue into implementation.
+5. Quality gates run sequentially after implementation.
 
-1. Clarify or write a short spec for ambiguous work.
-2. Break the work into small verifiable tasks.
-3. Use test-driven development for behavior changes.
-4. Use systematic debugging for failures.
-5. Verify with fresh commands before claiming completion.
-6. Request review before merge or handoff.
+Built-in quality gate names include `test`, `review`, `security_review`, and `docs`. Unknown names become custom gate prompts.
 
-This maps cleanly to local Superpowers skills such as brainstorming, writing plans, test-driven development, systematic debugging, verification before completion, and code review. It also maps to Addy Osmani's Agent Skills lifecycle: define, plan, build, verify, review, and ship.
+Quality gates currently run sequentially in the same runtime session, not as parallel independent agents. See [ADR-005](docs/decisions/0005-sequential-quality-gates.md) for the design rationale.
 
-For repo-specific coding-agent instructions, see [AGENTS.md](AGENTS.md).
+## Dashboard And API
 
-## Policy And Feedback
+The local dashboard is backed by the HTTP API under `/api/v1`.
 
-Use `policy` to restrict tools globally or by issue label. Label-specific allow rules override global allow rules for matching labels, then deny rules remove tools.
+Common endpoints:
 
-Use `feedback` to control tracker comments and optional state transitions. Comments are best-effort, and transitions are skipped for trackers that do not implement `updateIssueState`.
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /api/v1/state` | Runtime state, running issues, results, audit log, telemetry, retry queue, and awaiting review. |
+| `GET /api/v1/board` | Kanban board snapshot built from tracker and runtime state. |
+| `POST /api/v1/refresh` | Trigger a best-effort tracker refresh. |
+| `POST /api/v1/issues/:identifier/stop` | Stop a running issue. |
+| `POST /api/v1/issues/:identifier/retry` | Retry a failed or retryable issue. |
+| `POST /api/v1/issues/:identifier/pr/create` | Create or reuse a configured GitHub pull request. |
+| `POST /api/v1/dependencies/scan` | Run optional LLM dependency detection across issues. |
+| `POST /api/v1/settings` | Change supported runtime and tracker settings in memory. |
 
-Use `approval_gates` to require a human review loop before implementation. When enabled, matching issues run a planning turn first, Northstar posts the plan to the tracker, stores the awaiting-review state under `workspace.root/.northstar/awaiting-review.json`, and waits for an explicit command. Defaults are `/approve`, `/revise <feedback>`, and `/reject`; `labels` limits the gate to matching issue labels, `awaiting_state` optionally moves the tracker issue while waiting, and `approvers` restricts tracker-command authors that may approve or revise. Dashboard approval and feedback endpoints are available through the local HTTP server.
+Dashboard views:
 
-Use `quality_gates` to run extra sequential turns after the implementation turn succeeds. Built-in gate names include `test`, `review`, `security_review`, and `docs`; unknown names are passed through as custom gate prompts.
+- **Dashboard** - metrics, human review, model split, active runs, retry queue, audit trail.
+- **Board** - configurable Kanban columns, drag-and-drop moves, bulk ticket actions.
+- **Runs** - active runs and recent result event streams.
+- **PRs** - PR-ready tickets and handoff actions.
+- **Activity** - filterable audit log.
+- **Settings** - in-memory runtime model and tracker filter adjustments.
 
 ## Architecture
 
-```
-WORKFLOW.md  →  Orchestrator  →  Tracker (Linear / Jira / GitHub)
-                     │
-                     ├── Workspace (per-issue directory)
-                     ├── Tool policy filter
-                     ├── Skill profile injector
-                     ├── Runtime (Codex / Claude Code / Bedrock / Gemini)
-                     │       └── Quality gates (sequential turns)
-                     └── Feedback (tracker comments + state transitions)
+```text
+src/cli.ts
+  |
+  v
+Workflow loader -> Tracker adapter -> Orchestrator tick
+       |                |                 |
+       |                |                 +-> Dispatch state, retry, reconciliation
+       |                |                 +-> Workspace manager and lifecycle hooks
+       |                |                 +-> Runtime adapter and tool policy
+       |                |                 +-> Skill profile and quality gates
+       |                |
+       |                +-> Linear / Jira / GitHub issue normalization
+       |
+       +-> YAML config + Liquid prompt rendering
 
-HTTP server  →  state, refresh, stop, retry endpoints
-Dashboard    →  browser UI consuming the state endpoint
+Observability server
+  +-> state snapshots
+  +-> board snapshots
+  +-> dashboard assets
+  +-> action endpoints
 ```
 
 Key modules:
 
 | Module | Purpose |
 | --- | --- |
-| `src/workflow/` | WORKFLOW.md loading, YAML parsing, Liquid prompt rendering |
-| `src/tracker/` | Normalised `Issue` model; Linear, Jira, and GitHub Issues adapters |
-| `src/runtime/` | Runtime interface; Codex, Claude Code, Bedrock, Gemini harnesses |
-| `src/orchestrator/` | Dispatch, state, retry, reconciliation, stall restart |
-| `src/workspace/` | Per-issue directory creation and lifecycle hooks |
-| `src/tools/` | Integration tool contracts and per-runtime spec adapters |
-| `src/skills/` | Skill-sequence resolution and prompt injection |
-| `src/quality/` | Quality gate sequence resolution and prompt construction |
+| `src/workflow/` | `WORKFLOW.md` loading, schema validation, watching, and prompt rendering |
+| `src/tracker/` | Normalized issue model plus Linear, Jira, and GitHub adapters |
+| `src/runtime/` | Runtime interface and Codex, Claude Code, Bedrock, and Gemini harnesses |
+| `src/orchestrator/` | Dispatch, state, retry, reconciliation, approval gates, and sequencing |
+| `src/workspace/` | Per-issue workspace creation, hooks, and cleanup |
+| `src/tools/` | Integration contracts and runtime-specific tool adapters |
+| `src/skills/` | Prompt-level skill sequence resolution |
+| `src/quality/` | Sequential quality gate prompts |
+| `src/context/` | Deterministic issue context assembly |
 | `src/policy/` | Tool allow/deny filtering by label |
-| `src/context/` | Deterministic issue-context assembly for prompts |
-| `src/observability/` | HTTP server, dashboard, and result snapshots |
+| `src/observability/` | HTTP server, snapshots, and dashboard serving |
 
-See [docs/decisions/](docs/decisions/) for architecture decision records covering key design choices.
+## Documentation
+
+- [Workflow example](WORKFLOW.example.md)
+- [Operator dashboard and observability](docs/observability.md)
+- [Dependency sequencing](docs/sequencer.md)
+- [React UI components](docs/ui-components.md)
+- [Architecture decision records](docs/decisions/)
+- [Agent instructions](AGENTS.md)
 
 ## Development
 
@@ -186,11 +265,28 @@ Useful commands:
 npm run build
 npm test
 npm run test:watch
+npm run dev:mock
+npm run dev:web
 npm run spec:check
 ```
+
+Production-style local check:
+
+```bash
+npm run build
+node dist/src/cli.js ./WORKFLOW.md --port 4000
+```
+
+The Fastify server serves the built React app from `web/dist` when present. If the dashboard has not been built, the server returns a small diagnostic HTML page instead of failing mysteriously.
 
 CI runs install, build, tests, and the conformance checklist through `.github/workflows/ci.yml`.
 
 ## Trust Posture
 
-Northstar targets high-trust local development. It assumes credentials come from environment-variable indirection, redacts known secret keys from structured logs, scopes built-in file tools to the issue workspace, and fails rather than prompting when runtime user input would be required.
+Northstar is designed for high-trust local development:
+
+- Credentials should stay as environment-variable indirections in workflow files.
+- Known secret keys are redacted from structured logs.
+- Built-in file tools are scoped to the issue workspace.
+- Runtime/tool execution is treated as a trust boundary.
+- Northstar fails closed instead of prompting when runtime user input would be required.

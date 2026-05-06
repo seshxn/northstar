@@ -56,12 +56,22 @@ export class WorkspaceManager {
   }
 
   async runBeforeRun(workspace: string, issue: Pick<Issue, "id" | "identifier">): Promise<void> {
-    await runHook(this.hooks.before_run, { workspace, issueId: issue.id, issueIdentifier: issue.identifier, timeoutMs: this.hooks.timeout_ms ?? 60_000 });
+    await runHook(this.hooks.before_run, {
+      workspace,
+      issueId: issue.id,
+      issueIdentifier: issue.identifier,
+      timeoutMs: this.hooks.timeout_ms ?? 60_000
+    });
   }
 
   async runAfterRun(workspace: string, issue: Pick<Issue, "id" | "identifier">): Promise<void> {
     try {
-      await runHook(this.hooks.after_run, { workspace, issueId: issue.id, issueIdentifier: issue.identifier, timeoutMs: this.hooks.timeout_ms ?? 60_000 });
+      await runHook(this.hooks.after_run, {
+        workspace,
+        issueId: issue.id,
+        issueIdentifier: issue.identifier,
+        timeoutMs: this.hooks.timeout_ms ?? 60_000
+      });
     } catch {
       // after_run hook failures are non-fatal, matching the reference implementation.
     }
@@ -112,22 +122,20 @@ export class WorkspaceManager {
   }
 }
 
-export function safeIdentifier(identifier: string | null | undefined): string {
-  return (identifier || "issue").replace(/[^a-zA-Z0-9._-]/g, "_");
-}
+export const safeIdentifier = (identifier: string | null | undefined): string => (identifier || "issue").replace(/[^a-zA-Z0-9._-]/g, "_");
 
-async function existsAsDirectory(path: string): Promise<boolean> {
+const existsAsDirectory = async (path: string): Promise<boolean> => {
   try {
     return (await lstat(path)).isDirectory();
   } catch {
     return false;
   }
-}
+};
 
-async function realpathExistingPrefix(path: string): Promise<string> {
+const realpathExistingPrefix = async (path: string): Promise<string> => {
   try {
     return await realpath(path);
   } catch {
     return realpath(dirname(path));
   }
-}
+};

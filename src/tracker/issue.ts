@@ -21,13 +21,13 @@ export interface Issue {
   assigned_to_worker?: boolean;
 }
 
-export function normalizeLabels(labels: unknown): string[] {
+export const normalizeLabels = (labels: unknown): string[] => {
   if (!Array.isArray(labels)) return [];
   return labels.filter((label): label is string => typeof label === "string").map((label) => label.toLowerCase());
-}
+};
 
-export function issuePriority(value: unknown): number | null {
+export const issuePriority = (value: unknown): number | null => {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value === "string" && value.trim() !== "" && Number.isFinite(Number(value))) return Number(value);
   return null;
-}
+};

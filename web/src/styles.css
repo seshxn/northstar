@@ -1,0 +1,210 @@
+@import "tailwindcss";
+@plugin "@tailwindcss/typography";
+@import "@fontsource/geist-sans";
+@import "@fontsource/geist-mono";
+
+/* ---- Design tokens (OKLCH) ---- */
+
+:root {
+  color-scheme: light;
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.141 0.004 285.82);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.141 0.004 285.82);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.141 0.004 285.82);
+  --primary: oklch(0.205 0.002 285.82);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.961 0.001 286.29);
+  --secondary-foreground: oklch(0.205 0.002 285.82);
+  --muted: oklch(0.961 0.001 286.29);
+  --muted-foreground: oklch(0.491 0.003 285.94);
+  --accent: oklch(0.961 0.001 286.29);
+  --accent-foreground: oklch(0.205 0.002 285.82);
+  --destructive: oklch(0.577 0.245 27.325);
+  --destructive-foreground: oklch(0.985 0 0);
+  --border: oklch(0.914 0.002 286.32);
+  --input: oklch(0.914 0.002 286.32);
+  --ring: oklch(0.205 0.002 285.82);
+  --success: oklch(0.627 0.179 152.1);
+  --warning: oklch(0.756 0.175 63.98);
+  --info: oklch(0.546 0.198 249.62);
+  --radius: 0.75rem;
+  --shadow: 0 24px 80px oklch(0.141 0.004 285.82 / 0.08);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.208 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.208 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.985 0 0);
+  --primary-foreground: oklch(0.205 0.002 285.82);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.639 0 0);
+  --accent: oklch(0.295 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --destructive-foreground: oklch(0.985 0 0);
+  --border: oklch(0.325 0 0);
+  --input: oklch(0.325 0 0);
+  --ring: oklch(0.831 0 0);
+  --success: oklch(0.723 0.17 152.1);
+  --warning: oklch(0.795 0.152 66.29);
+  --info: oklch(0.602 0.168 250.6);
+  --shadow: 0 30px 100px oklch(0 0 0 / 0.5);
+}
+
+/* ---- Base ---- */
+
+* {
+  box-sizing: border-box;
+}
+html {
+  background: var(--background);
+}
+body {
+  margin: 0;
+  background: radial-gradient(circle at 50% -18rem, oklch(from var(--muted) l c h / 0.38), transparent 38rem), var(--background);
+  color: var(--foreground);
+  font-family:
+    "Geist Sans",
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  text-rendering: geometricPrecision;
+}
+button,
+input,
+textarea {
+  font: inherit;
+}
+button {
+  color: inherit;
+}
+
+/* ---- OKLCH hover/alpha utilities (not expressible in Tailwind) ---- */
+
+.hover-primary:hover {
+  background: oklch(from var(--primary) l c h / 0.9);
+}
+.hover-destructive:hover {
+  background: oklch(from var(--destructive) l c h / 0.9);
+}
+.bg-header {
+  background: oklch(from var(--background) l c h / 0.86);
+}
+.bg-column {
+  background: oklch(from var(--muted) l c h / 0.45);
+}
+.focus-ring:focus-within,
+.focus-ring:focus {
+  border-color: var(--ring);
+  box-shadow: 0 0 0 2px oklch(from var(--ring) l c h / 0.22);
+}
+.focus-ring-visible:focus-visible {
+  outline: 0;
+  box-shadow: 0 0 0 2px oklch(from var(--ring) l c h / 0.35);
+}
+.shadow-tab-active {
+  box-shadow: 0 1px 2px oklch(0 0 0 / 0.16);
+}
+.hover-ring:hover {
+  border-color: oklch(from var(--ring) l c h / 0.45);
+}
+.drop-ring {
+  border-color: oklch(from var(--ring) l c h / 0.55);
+}
+.drop-ring-destructive {
+  border-color: oklch(from var(--destructive) l c h / 0.65);
+}
+.toast-error-border {
+  border-color: oklch(from var(--destructive) l c h / 0.55);
+}
+
+/* Badge OKLCH tints */
+.badge-bg-good {
+  background: oklch(from var(--success) l c h / 0.12);
+  border-color: oklch(from var(--success) l c h / 0.32);
+}
+.badge-bg-warn {
+  background: oklch(from var(--warning) l c h / 0.12);
+  border-color: oklch(from var(--warning) l c h / 0.32);
+}
+.badge-bg-bad {
+  background: oklch(from var(--destructive) l c h / 0.12);
+  border-color: oklch(from var(--destructive) l c h / 0.38);
+}
+.badge-bg-info {
+  background: oklch(from var(--info) l c h / 0.12);
+  border-color: oklch(from var(--info) l c h / 0.34);
+}
+
+/* ---- Keyframes ---- */
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.spin {
+  animation: spin 0.8s linear infinite;
+}
+
+/* ---- Donut ring (SVG component) ---- */
+
+.donut-ring {
+  align-items: center;
+  display: inline-flex;
+  justify-content: center;
+  position: relative;
+}
+.donut-ring svg {
+  transform: rotate(-90deg);
+}
+.donut-ring-label {
+  font-weight: 700;
+  letter-spacing: -0.5px;
+  position: absolute;
+}
+
+/* ---- Token counter ---- */
+
+.token-counter {
+  font-feature-settings: "tnum";
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.5px;
+}
+
+/* ---- Prose overrides for plan markdown ---- */
+
+.plan-markdown :where(h1, h2, h3, h4) {
+  margin-top: 0;
+}
+
+/* ---- Geist Mono font family shorthand ---- */
+
+.font-mono-geist {
+  font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}

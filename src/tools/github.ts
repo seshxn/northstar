@@ -23,19 +23,41 @@ export class GitHubTool implements Tool {
       case "file_get":
         return jsonResult((await this.octokit.repos.getContent({ owner: repo.owner, repo: repo.repo, path: String(input.path) })).data);
       case "pr_comment":
-        return jsonResult((await this.octokit.issues.createComment({ owner: repo.owner, repo: repo.repo, issue_number: Number(input.pull_number), body: String(input.body) })).data);
+        return jsonResult(
+          (
+            await this.octokit.issues.createComment({
+              owner: repo.owner,
+              repo: repo.repo,
+              issue_number: Number(input.pull_number),
+              body: String(input.body)
+            })
+          ).data
+        );
       case "pr_create":
-        return jsonResult((await this.octokit.pulls.create({ owner: repo.owner, repo: repo.repo, title: String(input.title), head: String(input.head), base: String(input.base ?? "main"), body: String(input.body ?? "") })).data);
+        return jsonResult(
+          (
+            await this.octokit.pulls.create({
+              owner: repo.owner,
+              repo: repo.repo,
+              title: String(input.title),
+              head: String(input.head),
+              base: String(input.base ?? "main"),
+              body: String(input.body ?? "")
+            })
+          ).data
+        );
       case "pr_merge":
-        return jsonResult((await this.octokit.pulls.merge({ owner: repo.owner, repo: repo.repo, pull_number: Number(input.pull_number) })).data);
+        return jsonResult(
+          (await this.octokit.pulls.merge({ owner: repo.owner, repo: repo.repo, pull_number: Number(input.pull_number) })).data
+        );
       default:
         throw new Error(`unsupported github op: ${String(input.op)}`);
     }
   }
 }
 
-function parseRepo(repo: string | undefined): { owner: string; repo: string } {
+const parseRepo = (repo: string | undefined): { owner: string; repo: string } => {
   const [owner, name] = (repo ?? "").split("/");
   if (!owner || !name) throw new Error("github repo must be owner/name");
   return { owner, repo: name };
-}
+};

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { GoogleGenAI } from "@google/genai";
-import type { Runtime, Session, StartSessionOpts, RunTurnOpts, TurnResult } from "../types.js";
+import type { Runtime, RuntimeRunMode, Session, StartSessionOpts, RunTurnOpts, TurnResult } from "../types.js";
 import { runFunctionCallingLoop, type HarnessMessage, type ModelResponse } from "../harness.js";
 import type { Tool } from "../../tools/types.js";
 
@@ -8,7 +8,7 @@ export class GeminiRuntime implements Runtime {
   readonly kind = "gemini";
   readonly client: GoogleGenAI;
 
-  constructor(private readonly config: { api_key?: string; model?: string; max_tokens?: number }) {
+  constructor(private readonly config: { api_key?: string; model?: string; planning_model?: string; max_tokens?: number }) {
     this.client = new GoogleGenAI({ apiKey: config.api_key });
   }
 
@@ -22,7 +22,7 @@ class GeminiSession implements Session {
 
   constructor(
     private readonly client: GoogleGenAI,
-    private readonly config: { model?: string; max_tokens?: number },
+    private readonly config: { model?: string; planning_model?: string; max_tokens?: number },
     private readonly workspacePath: string,
     private readonly tools: Tool[]
   ) {}
@@ -34,7 +34,7 @@ class GeminiSession implements Session {
       workspacePath: this.workspacePath,
       signal: opts.signal,
       tools: this.tools,
-      callModel: (messages, tools, signal) => callGemini(this.client, this.config, messages, tools, signal),
+      callModel: (messages, tools, signal) => callGemini(this.client, this.config, messages, tools, signal, opts.mode),
       onEvent: opts.onEvent
     });
   }
@@ -42,21 +42,23 @@ class GeminiSession implements Session {
   async stop(): Promise<void> {}
 }
 
-async function callGemini(
+const callGemini = async (
   client: GoogleGenAI,
-  config: { model?: string; max_tokens?: number },
+  config: { model?: string; planning_model?: string; max_tokens?: number },
   messages: HarnessMessage[],
   tools: Tool[],
-  signal: AbortSignal
-): Promise<ModelResponse> {
+  signal: AbortSignal,
+  mode?: RuntimeRunMode
+): Promise<ModelResponse> => {
   if (signal.aborted) return { stopReason: "error", message: { role: "assistant", content: [] } };
 
-  const geminiTools = tools.length > 0
-    ? [{ functionDeclarations: tools.map((t) => ({ name: t.name, description: t.description, parameters: t.inputSchema })) }]
-    : undefined;
+  const geminiTools =
+    tools.length > 0
+      ? [{ functionDeclarations: tools.map((t) => ({ name: t.name, description: t.description, parameters: t.inputSchema })) }]
+      : undefined;
 
   const response = await client.models.generateContent({
-    model: config.model ?? "gemini-2.5-pro",
+    model: modelForTurn(config, mode),
     contents: toGeminiContents(messages) as Parameters<typeof client.models.generateContent>[0]["contents"],
     ...(geminiTools && { tools: geminiTools }),
     config: { maxOutputTokens: config.max_tokens ?? 8192 }
@@ -83,17 +85,22 @@ async function callGemini(
       outputTokens: response.usageMetadata?.candidatesTokenCount
     }
   };
-}
+};
 
-function mapGeminiFinishReason(reason: string): ModelResponse["stopReason"] {
+export const modelForTurn = (config: { model?: string; planning_model?: string }, mode?: RuntimeRunMode): string => {
+  if ((mode === "planning" || mode === "revision") && config.planning_model) return config.planning_model;
+  return config.model ?? "gemini-2.5-pro";
+};
+
+const mapGeminiFinishReason = (reason: string): ModelResponse["stopReason"] => {
   if (reason === "MAX_TOKENS") return "max_tokens";
   if (reason === "STOP") return "end_turn";
   return "error";
-}
+};
 
 export type GeminiContent = { role: "user" | "model"; parts: unknown[] };
 
-export function toGeminiContents(messages: HarnessMessage[]): GeminiContent[] {
+export const toGeminiContents = (messages: HarnessMessage[]): GeminiContent[] => {
   const result: GeminiContent[] = [];
   let i = 0;
   while (i < messages.length) {
@@ -129,4 +136,4 @@ export function toGeminiContents(messages: HarnessMessage[]): GeminiContent[] {
     }
   }
   return result;
-}
+};

@@ -4,7 +4,10 @@ import { z } from "zod";
 import { deepResolveEnv, resolvePathValue, type ResolveOpts } from "../config/env.js";
 
 const stringArray = z.array(z.string()).default([]);
-const lowerStringArray = z.array(z.string()).default([]).transform((values) => values.map((value) => value.toLowerCase()));
+const lowerStringArray = z
+  .array(z.string())
+  .default([])
+  .transform((values) => values.map((value) => value.toLowerCase()));
 
 const linearTrackerSchema = z.object({
   kind: z.literal("linear").default("linear"),
@@ -50,6 +53,7 @@ const runtimeSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("claude_code"),
     model: z.string().default("claude-opus-4-7"),
+    planning_model: z.string().optional(),
     api_key: z.string().optional(),
     max_turns: z.number().int().positive().default(50),
     allowed_tools: stringArray.optional(),
@@ -59,6 +63,7 @@ const runtimeSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("bedrock_anthropic"),
     model_id: z.string(),
+    planning_model: z.string().optional(),
     region: z.string().default("us-west-2"),
     max_tokens: z.number().int().positive().default(8192),
     aws_profile: z.string().optional(),
@@ -67,59 +72,133 @@ const runtimeSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("gemini"),
     model: z.string().default("gemini-2.5-pro"),
+    planning_model: z.string().optional(),
     api_key: z.string().optional(),
     max_tokens: z.number().int().positive().default(8192),
     builtin_tools: stringArray.default(["bash", "read", "write", "edit"])
   })
 ]);
 
-const integrationSchema = z.object({
-  linear_graphql: z.object({ enabled: z.boolean().default(true) }).optional(),
-  github: z.object({ enabled: z.boolean().default(false), token: z.string().optional(), default_repo: z.string().optional() }).optional(),
-  jira_tools: z.object({ enabled: z.boolean().default(false), base_url: z.string().optional(), email: z.string().optional(), api_token: z.string().optional() }).optional(),
-  slack: z.object({ enabled: z.boolean().default(false), token: z.string().optional(), default_channel: z.string().optional() }).optional(),
-  confluence: z.object({ enabled: z.boolean().default(false), base_url: z.string().optional(), email: z.string().optional(), api_token: z.string().optional(), default_space: z.string().optional() }).optional()
-}).default({});
+const integrationSchema = z
+  .object({
+    linear_graphql: z.object({ enabled: z.boolean().default(true) }).optional(),
+    github: z.object({ enabled: z.boolean().default(false), token: z.string().optional(), default_repo: z.string().optional() }).optional(),
+    jira_tools: z
+      .object({
+        enabled: z.boolean().default(false),
+        base_url: z.string().optional(),
+        email: z.string().optional(),
+        api_token: z.string().optional()
+      })
+      .optional(),
+    slack: z
+      .object({ enabled: z.boolean().default(false), token: z.string().optional(), default_channel: z.string().optional() })
+      .optional(),
+    confluence: z
+      .object({
+        enabled: z.boolean().default(false),
+        base_url: z.string().optional(),
+        email: z.string().optional(),
+        api_token: z.string().optional(),
+        default_space: z.string().optional()
+      })
+      .optional()
+  })
+  .default({});
 
-const skillsSchema = z.object({
-  enabled: z.boolean().default(false),
-  mode: z.enum(["prompt_injection"]).default("prompt_injection"),
-  default_sequence: stringArray.default([]),
-  label_sequences: z.record(stringArray).default({})
-}).default({});
+const skillsSchema = z
+  .object({
+    enabled: z.boolean().default(false),
+    mode: z.enum(["prompt_injection"]).default("prompt_injection"),
+    default_sequence: stringArray.default([]),
+    label_sequences: z.record(stringArray).default({})
+  })
+  .default({});
 
-const policySchema = z.object({
-  allowed_tools: stringArray.default([]),
-  disallowed_tools: stringArray.default([]),
-  allowed_tools_by_label: z.record(stringArray).default({}),
-  disallowed_tools_by_label: z.record(stringArray).default({})
-}).default({});
+const policySchema = z
+  .object({
+    allowed_tools: stringArray.default([]),
+    disallowed_tools: stringArray.default([]),
+    allowed_tools_by_label: z.record(stringArray).default({}),
+    disallowed_tools_by_label: z.record(stringArray).default({})
+  })
+  .default({});
 
-const feedbackSchema = z.object({
-  comments_enabled: z.boolean().default(true),
-  transitions: z.object({
-    started_state: z.string().optional(),
-    completed_state: z.string().optional(),
-    failed_state: z.string().optional()
-  }).default({})
-}).default({});
+const feedbackSchema = z
+  .object({
+    comments_enabled: z.boolean().default(true),
+    transitions: z
+      .object({
+        started_state: z.string().optional(),
+        completed_state: z.string().optional(),
+        failed_state: z.string().optional()
+      })
+      .default({})
+  })
+  .default({});
 
-const qualityGatesSchema = z.object({
-  enabled: z.boolean().default(false),
-  mode: z.enum(["sequential"]).default("sequential"),
-  default_sequence: stringArray.default([]),
-  label_sequences: z.record(stringArray).default({})
-}).default({});
+const qualityGatesSchema = z
+  .object({
+    enabled: z.boolean().default(false),
+    mode: z.enum(["sequential"]).default("sequential"),
+    default_sequence: stringArray.default([]),
+    label_sequences: z.record(stringArray).default({})
+  })
+  .default({});
 
-const approvalGatesSchema = z.object({
-  enabled: z.boolean().default(false),
-  labels: lowerStringArray,
-  awaiting_state: z.string().optional(),
-  approval_trigger: z.string().default("/approve"),
-  rejection_trigger: z.string().default("/reject"),
-  revision_trigger: z.string().default("/revise"),
-  approvers: z.array(z.string()).default([])
-}).default({});
+const approvalGatesSchema = z
+  .object({
+    enabled: z.boolean().default(false),
+    labels: lowerStringArray,
+    awaiting_state: z.string().optional(),
+    approval_trigger: z.string().default("/approve"),
+    rejection_trigger: z.string().default("/reject"),
+    revision_trigger: z.string().default("/revise"),
+    approvers: z.array(z.string()).default([])
+  })
+  .default({});
+
+const boardRuntimeStateSchema = z.enum([
+  "planning",
+  "awaiting_review",
+  "implementation",
+  "execution",
+  "retrying",
+  "completed",
+  "failed",
+  "stalled"
+]);
+
+const boardColumnSchema = z.object({
+  id: z.string().min(1),
+  title: z.string().min(1),
+  tracker_states: z.array(z.string()).default([]),
+  runtime_states: z.array(boardRuntimeStateSchema).default([]),
+  starts_agent: z.boolean().default(false),
+  accepts_manual_moves: z.boolean().optional()
+});
+
+const boardSchema = z
+  .object({
+    columns: z.array(boardColumnSchema).default([])
+  })
+  .default({});
+
+const pullRequestSchema = z
+  .object({
+    enabled: z.boolean().default(false),
+    provider: z.literal("github").default("github"),
+    repo: z.string().optional(),
+    token: z.string().optional(),
+    base_branch: z.string().default("main"),
+    draft: z.boolean().default(true),
+    labels: stringArray.default([]),
+    labels_by_issue_label: z.record(stringArray).default({}),
+    reviewers: stringArray.default([]),
+    title_template: z.string().default("{{ issue.identifier }}: {{ issue.title }}"),
+    body_template: z.string().default("")
+  })
+  .default({});
 
 const workflowSchema = z.object({
   tracker: z.union([linearTrackerSchema, jiraTrackerSchema, githubTrackerSchema]).default({ kind: "linear" }),
@@ -127,21 +206,33 @@ const workflowSchema = z.object({
   polling: z.object({ interval_ms: z.number().int().positive().default(30_000) }).default({}),
   workspace: z.object({ root: z.string().optional() }).default({}),
   worker: z.object({ ssh_hosts: stringArray, max_concurrent_agents_per_host: z.number().int().positive().optional() }).default({}),
-  agent: z.object({
-    max_concurrent_agents: z.number().int().positive().default(10),
-    max_turns: z.number().int().positive().default(20),
-    max_retry_backoff_ms: z.number().int().positive().default(300_000),
-    max_concurrent_agents_by_state: z.record(z.number().int().positive()).default({})
-  }).default({}),
-  hooks: z.object({
-    after_create: z.string().optional(),
-    before_run: z.string().optional(),
-    after_run: z.string().optional(),
-    before_remove: z.string().optional(),
-    timeout_ms: z.number().int().positive().default(60_000)
-  }).default({}),
-  observability: z.object({ dashboard_enabled: z.boolean().default(true), refresh_ms: z.number().int().positive().default(1000), render_interval_ms: z.number().int().positive().default(16) }).default({}),
+  agent: z
+    .object({
+      max_concurrent_agents: z.number().int().positive().default(10),
+      max_turns: z.number().int().positive().default(20),
+      max_retry_backoff_ms: z.number().int().positive().default(300_000),
+      max_concurrent_agents_by_state: z.record(z.number().int().positive()).default({})
+    })
+    .default({}),
+  hooks: z
+    .object({
+      after_create: z.string().optional(),
+      before_run: z.string().optional(),
+      after_run: z.string().optional(),
+      before_remove: z.string().optional(),
+      timeout_ms: z.number().int().positive().default(60_000)
+    })
+    .default({}),
+  observability: z
+    .object({
+      dashboard_enabled: z.boolean().default(true),
+      refresh_ms: z.number().int().positive().default(1000),
+      render_interval_ms: z.number().int().positive().default(16)
+    })
+    .default({}),
   server: z.object({ port: z.number().int().nonnegative().optional(), host: z.string().default("127.0.0.1") }).default({}),
+  board: boardSchema,
+  pull_request: pullRequestSchema,
   skills: skillsSchema,
   quality_gates: qualityGatesSchema,
   approval_gates: approvalGatesSchema,
@@ -154,7 +245,7 @@ export type NorthstarConfig = z.infer<typeof workflowSchema>;
 export type RuntimeConfig = NorthstarConfig["runtime"];
 export type TrackerConfig = NorthstarConfig["tracker"];
 
-export function parseWorkflowConfig(input: Record<string, unknown>, opts: ResolveOpts = {}): NorthstarConfig {
+export const parseWorkflowConfig = (input: Record<string, unknown>, opts: ResolveOpts = {}): NorthstarConfig => {
   const normalized = normalizeLegacyCodex(deepResolveEnv(input, opts));
   const parsed = workflowSchema.parse(normalized);
   return {
@@ -172,10 +263,10 @@ export function parseWorkflowConfig(input: Record<string, unknown>, opts: Resolv
       )
     }
   };
-}
+};
 
-function normalizeLegacyCodex(input: Record<string, unknown>): Record<string, unknown> {
+const normalizeLegacyCodex = (input: Record<string, unknown>): Record<string, unknown> => {
   if (input.runtime || !input.codex || typeof input.codex !== "object") return input;
   const { codex: legacy, ...rest } = input;
   return { ...rest, runtime: { kind: "codex_app_server", ...(legacy as Record<string, unknown>) } };
-}
+};

@@ -1,6 +1,6 @@
 import type { Issue } from "../issue.js";
 
-export function normalizeGitHubIssue(raw: Record<string, unknown>): Issue | null {
+export const normalizeGitHubIssue = (raw: Record<string, unknown>): Issue | null => {
   const number = raw.number;
   const title = raw.title;
   if (typeof number !== "number" || typeof title !== "string") return null;
@@ -27,14 +27,11 @@ export function normalizeGitHubIssue(raw: Record<string, unknown>): Issue | null
     blocked_by: [],
     created_at: typeof raw.created_at === "string" ? raw.created_at : null,
     updated_at: typeof raw.updated_at === "string" ? raw.updated_at : null,
-    assignee_id:
-      raw.assignee && typeof raw.assignee === "object"
-        ? stringOrNull((raw.assignee as Record<string, unknown>).login)
-        : null
+    assignee_id: raw.assignee && typeof raw.assignee === "object" ? stringOrNull((raw.assignee as Record<string, unknown>).login) : null
   };
-}
+};
 
-function priorityFromLabels(labels: string[]): number | null {
+const priorityFromLabels = (labels: string[]): number | null => {
   for (const label of labels) {
     const l = label.toLowerCase();
     if (l === "priority: critical" || l === "p0") return 0;
@@ -43,8 +40,6 @@ function priorityFromLabels(labels: string[]): number | null {
     if (l === "priority: low" || l === "p3") return 3;
   }
   return null;
-}
+};
 
-function stringOrNull(value: unknown): string | null {
-  return typeof value === "string" ? value : null;
-}
+const stringOrNull = (value: unknown): string | null => (typeof value === "string" ? value : null);

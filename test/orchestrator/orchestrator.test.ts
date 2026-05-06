@@ -81,9 +81,23 @@ describe("SPEC 17.4 orchestrator dispatch, retry, and reconcile", () => {
   test("stops and releases running issues that become terminal or disappear", async () => {
     const stop = vi.fn(async () => undefined);
     const state = createInitialState({ maxConcurrentAgents: 2, activeStates: ["Todo"], terminalStates: ["Done"] });
-    state.running.set("a", { issue: issue({ id: "a" }), threadId: "t-a", startedAt: new Date(), lastActivityAt: new Date(), stop, events: [] });
+    state.running.set("a", {
+      issue: issue({ id: "a" }),
+      threadId: "t-a",
+      startedAt: new Date(),
+      lastActivityAt: new Date(),
+      stop,
+      events: []
+    });
     state.claimed.add("a");
-    state.running.set("b", { issue: issue({ id: "b" }), threadId: "t-b", startedAt: new Date(), lastActivityAt: new Date(), stop, events: [] });
+    state.running.set("b", {
+      issue: issue({ id: "b" }),
+      threadId: "t-b",
+      startedAt: new Date(),
+      lastActivityAt: new Date(),
+      stop,
+      events: []
+    });
     state.claimed.add("b");
 
     await reconcileRunningIssues(state, [issue({ id: "a", state: "Done" })]);
@@ -130,7 +144,7 @@ describe("SPEC 17.4 orchestrator dispatch, retry, and reconcile", () => {
       runtime: { kind: "codex_app_server" },
       workspace: { root },
       hooks: {
-        after_create: "printf \"$NORTHSTAR_ISSUE_IDENTIFIER\" > created.txt",
+        after_create: 'printf "$NORTHSTAR_ISSUE_IDENTIFIER" > created.txt',
         before_run: "printf before > before.txt",
         after_run: "printf after > after.txt"
       },
@@ -138,7 +152,12 @@ describe("SPEC 17.4 orchestrator dispatch, retry, and reconcile", () => {
         github: { enabled: true, token: "github-token", default_repo: "openai/northstar" }
       }
     } as never);
-    const orchestrator = new Orchestrator(config, tracker, runtime, "Implement {{ issue.identifier }}: {{ issue.title }} / {{ issue.labels[0] }}");
+    const orchestrator = new Orchestrator(
+      config,
+      tracker,
+      runtime,
+      "Implement {{ issue.identifier }}: {{ issue.title }} / {{ issue.labels[0] }}"
+    );
 
     await orchestrator.tick();
     await orchestrator.waitForIdle();
@@ -186,7 +205,11 @@ describe("SPEC 17.4 orchestrator dispatch, retry, and reconcile", () => {
       .mockResolvedValueOnce({ status: "completed" as const, output: "second success", tokens: { input: 1, output: 2, total: 3 } });
     const runtime: Runtime = {
       kind: "test",
-      startSession: vi.fn(async () => ({ threadId: `thread-${runTurn.mock.calls.length + 1}`, runTurn, stop: vi.fn(async () => undefined) }))
+      startSession: vi.fn(async () => ({
+        threadId: `thread-${runTurn.mock.calls.length + 1}`,
+        runTurn,
+        stop: vi.fn(async () => undefined)
+      }))
     };
     const config = parseWorkflowConfig({
       tracker: { kind: "linear", api_key: "linear-token", active_states: ["Todo"], terminal_states: ["Done"] },
@@ -325,11 +348,13 @@ describe("SPEC 17.4 orchestrator dispatch, retry, and reconcile", () => {
     };
     let resolveFirst: (value: { status: "failed"; output: string }) => void = () => undefined;
     let resolveSecond: (value: { status: "completed"; output: string }) => void = () => undefined;
-    const first = new Promise<{ status: "failed"; output: string }>((resolve) => { resolveFirst = resolve; });
-    const second = new Promise<{ status: "completed"; output: string }>((resolve) => { resolveSecond = resolve; });
-    const runTurn = vi.fn()
-      .mockReturnValueOnce(first)
-      .mockReturnValueOnce(second);
+    const first = new Promise<{ status: "failed"; output: string }>((resolve) => {
+      resolveFirst = resolve;
+    });
+    const second = new Promise<{ status: "completed"; output: string }>((resolve) => {
+      resolveSecond = resolve;
+    });
+    const runTurn = vi.fn().mockReturnValueOnce(first).mockReturnValueOnce(second);
     let session = 0;
     const runtime: Runtime = {
       kind: "test",

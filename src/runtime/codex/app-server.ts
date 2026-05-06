@@ -23,7 +23,14 @@ class CodexAppServerSession implements Session {
     this.process = spawn(command, args, { stdio: ["pipe", "pipe", "pipe"] });
     const started = Date.now();
     opts.onEvent(normalizeCodexEvent({ type: "session_started", threadId: this.threadId }));
-    this.process.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "runTurn", params: { prompt: opts.prompt, tools: opts.tools.map((tool) => tool.name) } }) + "\n");
+    this.process.stdin.write(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "runTurn",
+        params: { prompt: opts.prompt, tools: opts.tools.map((tool) => tool.name) }
+      }) + "\n"
+    );
     this.process.stdin.end();
     return new Promise((resolve) => {
       let output = "";
@@ -31,17 +38,24 @@ class CodexAppServerSession implements Session {
         this.process?.kill("SIGTERM");
         resolve({ status: "timeout", output });
       }, this.config.turn_timeout_ms ?? 3_600_000);
-      this.process?.stdout.on("data", (chunk) => { output += chunk; opts.onEvent(normalizeCodexEvent({ type: "stdout", message: String(chunk) })); });
+      this.process?.stdout.on("data", (chunk) => {
+        output += chunk;
+        opts.onEvent(normalizeCodexEvent({ type: "stdout", message: String(chunk) }));
+      });
       this.process?.stderr.on("data", (chunk) => opts.onEvent(normalizeCodexEvent({ type: "stderr", message: String(chunk) })));
       this.process?.on("close", (code) => {
         clearTimeout(timeout);
         resolve({ status: code === 0 ? "completed" : "failed", output, tokens: { input: 0, output: 0, total: 0 } });
       });
-      opts.signal.addEventListener("abort", () => {
-        this.process?.kill("SIGTERM");
-        clearTimeout(timeout);
-        resolve({ status: "cancelled", output, tokens: { input: 0, output: 0, total: 0 } });
-      }, { once: true });
+      opts.signal.addEventListener(
+        "abort",
+        () => {
+          this.process?.kill("SIGTERM");
+          clearTimeout(timeout);
+          resolve({ status: "cancelled", output, tokens: { input: 0, output: 0, total: 0 } });
+        },
+        { once: true }
+      );
       void started;
     });
   }

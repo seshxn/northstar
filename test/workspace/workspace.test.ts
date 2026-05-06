@@ -9,7 +9,7 @@ describe("SPEC 17.2 workspace lifecycle", () => {
     const root = await mkdtemp(join(tmpdir(), "northstar-workspaces-"));
     const manager = new WorkspaceManager({
       root,
-      hooks: { after_create: "printf \"$NORTHSTAR_ISSUE_IDENTIFIER\" > hook.txt", timeout_ms: 2000 }
+      hooks: { after_create: 'printf "$NORTHSTAR_ISSUE_IDENTIFIER" > hook.txt', timeout_ms: 2000 }
     });
 
     const first = await manager.createForIssue({ id: "1", identifier: "SYM/1 risky", title: "x" });

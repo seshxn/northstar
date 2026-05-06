@@ -1,6 +1,8 @@
 import type { Issue } from "../tracker/issue.js";
 import type { Tool } from "../tools/types.js";
 
+export type RuntimeRunMode = "implementation" | "planning" | "revision" | "execution";
+
 export interface Runtime {
   readonly kind: string;
   startSession(opts: StartSessionOpts): Promise<Session>;
@@ -20,6 +22,7 @@ export interface Session {
 
 export interface RunTurnOpts {
   prompt: string;
+  mode?: RuntimeRunMode;
   issue: Issue;
   tools: Tool[];
   onEvent: (event: RuntimeEvent) => void;
