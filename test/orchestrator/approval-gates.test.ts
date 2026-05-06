@@ -24,12 +24,34 @@ const issue = (overrides: Partial<Issue> = {}): Issue => ({
   updated_at: overrides.updated_at ?? null
 });
 
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, resolve, reject };
+}
+
 describe("approval gate orchestration", () => {
   test("parses explicit approval commands and ignores quoted commands", () => {
-    expect(parseApprovalCommand("/approve", { approvalTrigger: "/approve", rejectionTrigger: "/reject", revisionTrigger: "/revise" })).toEqual({ kind: "approve" });
-    expect(parseApprovalCommand("/reject not safe", { approvalTrigger: "/approve", rejectionTrigger: "/reject", revisionTrigger: "/revise" })).toEqual({ kind: "reject", message: "not safe" });
-    expect(parseApprovalCommand("/revise add tests", { approvalTrigger: "/approve", rejectionTrigger: "/reject", revisionTrigger: "/revise" })).toEqual({ kind: "revise", message: "add tests" });
-    expect(parseApprovalCommand("> /approve\nlooks good", { approvalTrigger: "/approve", rejectionTrigger: "/reject", revisionTrigger: "/revise" })).toBeNull();
+    expect(
+      parseApprovalCommand("/approve", { approvalTrigger: "/approve", rejectionTrigger: "/reject", revisionTrigger: "/revise" })
+    ).toEqual({ kind: "approve" });
+    expect(
+      parseApprovalCommand("/reject not safe", { approvalTrigger: "/approve", rejectionTrigger: "/reject", revisionTrigger: "/revise" })
+    ).toEqual({ kind: "reject", message: "not safe" });
+    expect(
+      parseApprovalCommand("/revise add tests", { approvalTrigger: "/approve", rejectionTrigger: "/reject", revisionTrigger: "/revise" })
+    ).toEqual({ kind: "revise", message: "add tests" });
+    expect(
+      parseApprovalCommand("> /approve\nlooks good", {
+        approvalTrigger: "/approve",
+        rejectionTrigger: "/reject",
+        revisionTrigger: "/revise"
+      })
+    ).toBeNull();
   });
 
   test("planning turn posts and persists an awaiting review entry instead of executing", async () => {
@@ -47,9 +69,10 @@ describe("approval gate orchestration", () => {
       updateIssueState: vi.fn(async () => undefined)
     };
     const prompts: string[] = [];
+    const planningTurn = deferred<{ status: "completed"; output: string }>();
     const runTurn = vi.fn(async (opts: RunTurnOpts) => {
       prompts.push(opts.prompt);
-      return { status: "completed" as const, output: "Plan:\n1. Add tests\n2. Implement" };
+      return planningTurn.promise;
     });
     const runtime: Runtime = {
       kind: "test",
@@ -68,6 +91,8 @@ describe("approval gate orchestration", () => {
     const orchestrator = new Orchestrator(config, tracker, runtime, "Implement {{ issue.identifier }}");
 
     await orchestrator.tick();
+    expect(orchestrator.state.running.get("issue-hitl")?.mode).toBe("planning");
+    planningTurn.resolve({ status: "completed", output: "Plan:\n1. Add tests\n2. Implement" });
     await orchestrator.waitForIdle();
 
     expect(runTurn).toHaveBeenCalledTimes(1);
@@ -99,6 +124,7 @@ describe("approval gate orchestration", () => {
       updateIssueState: vi.fn(async () => undefined)
     };
     const prompts: string[] = [];
+    const executionTurn = deferred<{ status: "completed"; output: string; tokens: { input: number; output: number; total: number } }>();
     const runTurn = vi
       .fn()
       .mockImplementationOnce(async (opts: RunTurnOpts) => {
@@ -107,11 +133,15 @@ describe("approval gate orchestration", () => {
       })
       .mockImplementationOnce(async (opts: RunTurnOpts) => {
         prompts.push(opts.prompt);
-        return { status: "completed" as const, output: "implemented", tokens: { input: 1, output: 2, total: 3 } };
+        return executionTurn.promise;
       });
     const runtime: Runtime = {
       kind: "test",
-      startSession: vi.fn(async (opts: StartSessionOpts) => ({ threadId: `thread-${opts.issue.identifier}-${runTurn.mock.calls.length + 1}`, runTurn, stop: vi.fn(async () => undefined) }))
+      startSession: vi.fn(async (opts: StartSessionOpts) => ({
+        threadId: `thread-${opts.issue.identifier}-${runTurn.mock.calls.length + 1}`,
+        runTurn,
+        stop: vi.fn(async () => undefined)
+      }))
     };
     const config = parseWorkflowConfig({
       tracker: { kind: "linear", api_key: "linear-token", active_states: ["Todo"], terminal_states: ["Done"] },
@@ -128,6 +158,8 @@ describe("approval gate orchestration", () => {
     await orchestrator.waitForIdle();
     comments.push({ id: "human-1", body: "/approve", created_at: new Date().toISOString(), author: "lead" });
     await orchestrator.tick();
+    expect(orchestrator.state.running.get("issue-hitl")?.mode).toBe("execution");
+    executionTurn.resolve({ status: "completed", output: "implemented", tokens: { input: 1, output: 2, total: 3 } });
     await orchestrator.waitForIdle();
 
     expect(runtime.startSession).toHaveBeenCalledTimes(2);
@@ -157,7 +189,11 @@ describe("approval gate orchestration", () => {
       .mockResolvedValueOnce({ status: "completed" as const, output: "revised plan" });
     const runtime: Runtime = {
       kind: "test",
-      startSession: vi.fn(async () => ({ threadId: `thread-${runTurn.mock.calls.length + 1}`, runTurn, stop: vi.fn(async () => undefined) }))
+      startSession: vi.fn(async () => ({
+        threadId: `thread-${runTurn.mock.calls.length + 1}`,
+        runTurn,
+        stop: vi.fn(async () => undefined)
+      }))
     };
     const config = parseWorkflowConfig({
       tracker: { kind: "linear", api_key: "linear-token", active_states: ["Todo"], terminal_states: ["Done"] },
@@ -180,5 +216,47 @@ describe("approval gate orchestration", () => {
       lastProcessedCommentId: "human-1"
     });
     expect(orchestrator.state.completed.has("SYM-42")).toBe(false);
+  });
+
+  test("dashboard rejection clears awaiting review and transitions to failed state", async () => {
+    const root = await mkdtemp(join(tmpdir(), "northstar-hitl-dashboard-reject-"));
+    const candidate = issue();
+    const comments: TrackerComment[] = [];
+    const tracker: Tracker = {
+      fetchCandidateIssues: vi.fn(async () => [candidate]),
+      fetchIssuesByStates: vi.fn(async () => [candidate]),
+      fetchIssueStatesByIds: vi.fn(async () => [candidate]),
+      createComment: vi.fn(async (_issueId, body) => {
+        comments.push({ id: `comment-${comments.length + 1}`, body, created_at: new Date().toISOString(), author: "northstar" });
+      }),
+      fetchComments: vi.fn(async () => comments),
+      updateIssueState: vi.fn(async () => undefined)
+    };
+    const runTurn = vi.fn(async () => ({ status: "completed" as const, output: "plan body" }));
+    const runtime: Runtime = {
+      kind: "test",
+      startSession: vi.fn(async () => ({ threadId: "planning-thread", runTurn, stop: vi.fn(async () => undefined) }))
+    };
+    const config = parseWorkflowConfig({
+      tracker: { kind: "linear", api_key: "linear-token", active_states: ["Todo"], terminal_states: ["Done"] },
+      runtime: { kind: "codex_app_server" },
+      workspace: { root },
+      approval_gates: { enabled: true },
+      feedback: {
+        transitions: {
+          failed_state: "Blocked"
+        }
+      }
+    } as never);
+    const orchestrator = new Orchestrator(config, tracker, runtime, "Implement {{ issue.identifier }}");
+
+    await orchestrator.tick();
+    await orchestrator.waitForIdle();
+
+    await expect(orchestrator.rejectIssue("SYM-42", "too risky")).resolves.toBe(true);
+
+    expect(orchestrator.state.awaitingReview.has("issue-hitl")).toBe(false);
+    expect(tracker.updateIssueState).toHaveBeenCalledWith("issue-hitl", "Blocked");
+    expect(comments.at(-1)?.body).toContain("too risky");
   });
 });

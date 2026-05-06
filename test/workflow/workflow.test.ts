@@ -173,4 +173,126 @@ describe("SPEC 17.1 workflow loading and config", () => {
       approvers: ["lead@example.com"]
     });
   });
+
+  test("parses optional board columns", () => {
+    const config = parseWorkflowConfig({
+      board: {
+        columns: [
+          {
+            id: "ready",
+            title: "Ready",
+            tracker_states: ["Ready for Agent"],
+            starts_agent: true
+          },
+          {
+            id: "human-review",
+            title: "Human Review",
+            runtime_states: ["awaiting_review"],
+            accepts_manual_moves: false
+          }
+        ]
+      }
+    });
+
+    expect(config.board.columns).toEqual([
+      {
+        id: "ready",
+        title: "Ready",
+        tracker_states: ["Ready for Agent"],
+        runtime_states: [],
+        starts_agent: true,
+        accepts_manual_moves: undefined
+      },
+      {
+        id: "human-review",
+        title: "Human Review",
+        tracker_states: [],
+        runtime_states: ["awaiting_review"],
+        starts_agent: false,
+        accepts_manual_moves: false
+      }
+    ]);
+  });
+
+  test("parses optional pull request handoff config", () => {
+    const config = parseWorkflowConfig(
+      {
+        pull_request: {
+          enabled: true,
+          provider: "github",
+          repo: "owner/repo",
+          token: "$GITHUB_TOKEN",
+          base_branch: "develop",
+          draft: false,
+          labels: ["northstar"],
+          labels_by_issue_label: {
+            security: ["security-review-required"]
+          },
+          reviewers: ["lead"],
+          title_template: "{{ issue.identifier }}: {{ issue.title }}",
+          body_template: "Plan\n{{ northstar.approved_plan }}"
+        }
+      },
+      {
+        env: { GITHUB_TOKEN: "gh-token" }
+      }
+    );
+
+    expect(config.pull_request).toEqual({
+      enabled: true,
+      provider: "github",
+      repo: "owner/repo",
+      token: "gh-token",
+      base_branch: "develop",
+      draft: false,
+      labels: ["northstar"],
+      labels_by_issue_label: {
+        security: ["security-review-required"]
+      },
+      reviewers: ["lead"],
+      title_template: "{{ issue.identifier }}: {{ issue.title }}",
+      body_template: "Plan\n{{ northstar.approved_plan }}"
+    });
+  });
+
+  test("parses planning models for model-backed runtimes", () => {
+    const claude = parseWorkflowConfig({
+      runtime: {
+        kind: "claude_code",
+        model: "claude-sonnet-exec",
+        planning_model: "claude-opus-plan"
+      }
+    });
+    expect(claude.runtime).toMatchObject({
+      kind: "claude_code",
+      model: "claude-sonnet-exec",
+      planning_model: "claude-opus-plan"
+    });
+
+    const bedrock = parseWorkflowConfig({
+      runtime: {
+        kind: "bedrock_anthropic",
+        model_id: "anthropic.claude-sonnet-exec",
+        planning_model: "anthropic.claude-opus-plan"
+      }
+    });
+    expect(bedrock.runtime).toMatchObject({
+      kind: "bedrock_anthropic",
+      model_id: "anthropic.claude-sonnet-exec",
+      planning_model: "anthropic.claude-opus-plan"
+    });
+
+    const gemini = parseWorkflowConfig({
+      runtime: {
+        kind: "gemini",
+        model: "gemini-exec",
+        planning_model: "gemini-plan"
+      }
+    });
+    expect(gemini.runtime).toMatchObject({
+      kind: "gemini",
+      model: "gemini-exec",
+      planning_model: "gemini-plan"
+    });
+  });
 });

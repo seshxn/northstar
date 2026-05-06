@@ -1,7 +1,7 @@
 import type { NorthstarConfig } from "../workflow/schema.js";
 import type { Tracker } from "../tracker/types.js";
 import type { Runtime, RuntimeEvent, TurnResult } from "../runtime/types.js";
-import { createInitialState, type OrchestratorState } from "./state.js";
+import { createInitialState, type AuditEventKind, type OrchestratorState, type RunMode } from "./state.js";
 import { dispatchCandidates, type StartedRun } from "./tick.js";
 import { WorkspaceManager } from "../workspace/manager.js";
 import { buildTools } from "../tools/registry.js";
@@ -14,6 +14,7 @@ import { renderSkillInstructions, skillSequenceForIssue } from "../skills/profil
 import { filterToolsForIssue } from "../policy/tools.js";
 import { qualityGateSequenceForIssue, renderQualityGatePrompt } from "../quality/gates.js";
 import type { TrackerComment } from "../tracker/types.js";
+import { analyzeDependencies } from "./sequencer.js";
 import {
   approvalAuthorAllowed,
   approvalGatesApply,
@@ -26,8 +27,6 @@ import {
   saveAwaitingReview,
   type AwaitingReviewEntry
 } from "./approval-gates.js";
-
-type RunMode = "implementation" | "planning" | "revision" | "execution";
 
 export class Orchestrator {
   readonly state: OrchestratorState;
@@ -72,12 +71,36 @@ export class Orchestrator {
       await dispatchCandidates({
         state: this.state,
         issues,
-        startRun: (issue) => approvalGatesApply(this.config.approval_gates, issue)
-          ? this.prepareRun(issue, { mode: "planning" })
-          : this.prepareRun(issue, { mode: "implementation" }),
-        onStarted: (issue, started) => this.trackRun(issue, started, approvalGatesApply(this.config.approval_gates, issue) ? "planning" : "implementation")
+        startRun: (issue) =>
+          approvalGatesApply(this.config.approval_gates, issue)
+            ? this.prepareRun(issue, { mode: "planning" })
+            : this.prepareRun(issue, { mode: "implementation" }),
+        onStarted: (issue, started) => this.trackRun(issue, started, started.mode ?? "implementation")
       });
       return this.state;
+    });
+  }
+
+  scanDependencies(): Promise<void> {
+    return this.enqueue(async () => {
+      const issues = await this.tracker.fetchCandidateIssues();
+      const results = await analyzeDependencies(issues, {
+        model: planningModelForConfig(this.config),
+        apiKey: apiKeyForConfig(this.config)
+      });
+      this.state.detectedDependencies.clear();
+      for (const result of results) {
+        if (result.blockedBy.length > 0) {
+          this.state.detectedDependencies.set(result.issueId, result.blockedBy);
+          const issue = issues.find((i) => i.id === result.issueId);
+          this.audit("dependency_detected", {
+            issueId: result.issueId,
+            issueIdentifier: issue?.identifier,
+            message: `LLM detected ${result.blockedBy.length} blocker(s) for ${issue?.identifier ?? result.issueId}: ${result.blockedBy.join(", ")}`,
+            metadata: { blockedBy: result.blockedBy }
+          });
+        }
+      }
     });
   }
 
@@ -95,6 +118,11 @@ export class Orchestrator {
     const match = this.findRunning(identifier);
     if (!match) return false;
     await match.stop();
+    this.audit("issue_stopped", {
+      issueId: match.issue.id,
+      issueIdentifier: match.issue.identifier,
+      message: `Run stopped for ${match.issue.identifier}`
+    });
     this.state.running.delete(match.issue.id);
     this.state.claimed.delete(match.issue.id);
     return true;
@@ -104,6 +132,7 @@ export class Orchestrator {
     await this.ensureAwaitingReviewLoaded();
     const entry = this.findAwaiting(identifier);
     if (!entry) return false;
+    this.audit("approval_triggered", { issueId: entry.issueId, issueIdentifier: entry.issue, message: `Plan approved for ${entry.issue}` });
     const issue = await this.issueForAwaiting(entry);
     await this.startApprovedRun(issue, entry);
     return true;
@@ -113,8 +142,31 @@ export class Orchestrator {
     await this.ensureAwaitingReviewLoaded();
     const entry = this.findAwaiting(identifier);
     if (!entry || message.trim() === "") return false;
+    this.audit("feedback_triggered", {
+      issueId: entry.issueId,
+      issueIdentifier: entry.issue,
+      message: `Feedback submitted for ${entry.issue}: "${message.slice(0, 80)}"`
+    });
     const issue = await this.issueForAwaiting(entry);
     await this.startRevisionRun(issue, entry, message.trim(), `dashboard-${Date.now()}`);
+    return true;
+  }
+
+  async rejectIssue(identifier: string, message?: string): Promise<boolean> {
+    await this.ensureAwaitingReviewLoaded();
+    const entry = this.findAwaiting(identifier);
+    if (!entry) return false;
+    this.audit("rejection_triggered", {
+      issueId: entry.issueId,
+      issueIdentifier: entry.issue,
+      message: `Plan rejected for ${entry.issue}${message ? `: ${message.slice(0, 80)}` : ""}`
+    });
+    this.state.awaitingReview.delete(entry.issueId);
+    this.state.claimed.delete(entry.issueId);
+    await this.persistAwaitingReview();
+    await this.transition(entry.issueId, this.config.feedback.transitions.failed_state);
+    const suffix = message?.trim() ? ` Reason: ${message.trim()}` : "";
+    await this.comment(entry.issueId, `Northstar approval gate rejected ${entry.issue}.${suffix}`);
     return true;
   }
 
@@ -127,7 +179,10 @@ export class Orchestrator {
     return true;
   }
 
-  private async prepareRun(issue: Issue, opts: { mode: RunMode; promptOverride?: string } = { mode: "implementation" }): Promise<StartedRun> {
+  private async prepareRun(
+    issue: Issue,
+    opts: { mode: RunMode; promptOverride?: string } = { mode: "implementation" }
+  ): Promise<StartedRun> {
     const workspace = await this.workspaceManager.createForIssue(issue);
     await this.workspaceManager.runBeforeRun(workspace.path, issue);
     const tools = filterToolsForIssue(buildTools(this.config), this.config.policy, issue);
@@ -156,19 +211,22 @@ export class Orchestrator {
     };
     return {
       threadId: session.threadId,
+      mode: opts.mode,
       workspacePath: workspace.path,
       prompt,
       tools,
       attempt,
       skillSequence,
       stop,
-      run: (turnPrompt = prompt) => session.runTurn({
-        prompt: turnPrompt,
-        issue,
-        tools: [...tools],
-        onEvent: (event) => this.recordEvent(issue.id, event),
-        signal: abortController.signal
-      })
+      run: (turnPrompt = prompt) =>
+        session.runTurn({
+          prompt: turnPrompt,
+          mode: opts.mode,
+          issue,
+          tools: [...tools],
+          onEvent: (event) => this.recordEvent(issue.id, event),
+          signal: abortController.signal
+        })
     };
   }
 
@@ -197,12 +255,19 @@ export class Orchestrator {
       if (result.status === "completed") {
         let previousOutput = result.output;
         for (const gate of qualityGateSequenceForIssue(this.config.quality_gates, issue)) {
-          const gateResult = await started.run?.(renderQualityGatePrompt(gate, issue, previousOutput)) ?? { status: "failed" as const, output: `quality gate ${gate} could not run` };
+          const gateResult = (await started.run?.(renderQualityGatePrompt(gate, issue, previousOutput))) ?? {
+            status: "failed" as const,
+            output: `quality gate ${gate} could not run`
+          };
           turnResults.push(gateResult);
           gateResults.push({ gate, status: gateResult.status, output: gateResult.output });
           previousOutput = [previousOutput, gateResult.output].filter(Boolean).join("\n\n");
           if (gateResult.status !== "completed") {
-            result = { status: gateResult.status, output: `Quality gate ${gate} finished with status ${gateResult.status}: ${gateResult.output ?? ""}`, tokens: gateResult.tokens };
+            result = {
+              status: gateResult.status,
+              output: `Quality gate ${gate} finished with status ${gateResult.status}: ${gateResult.output ?? ""}`,
+              tokens: gateResult.tokens
+            };
             break;
           }
         }
@@ -222,6 +287,15 @@ export class Orchestrator {
     }
     if (result.status === "completed") this.state.completed.add(issue.identifier);
     if (result.status === "failed" || result.status === "timeout") this.scheduleRetry(issue, started, result);
+    this.audit(result.status === "completed" ? "run_completed" : "run_failed", {
+      issueId: issue.id,
+      issueIdentifier: issue.identifier,
+      message:
+        result.status === "completed"
+          ? `Run completed for ${issue.identifier} (${result.tokens?.total ?? 0} tokens)`
+          : `Run ${result.status} for ${issue.identifier}: ${(result.output ?? "").slice(0, 120)}`,
+      metadata: { status: result.status, tokens: result.tokens, attempt: started.attempt }
+    });
     this.state.results.set(issue.id, {
       issueId: issue.id,
       issue: issue.identifier,
@@ -240,7 +314,10 @@ export class Orchestrator {
     this.state.running.delete(issue.id);
     this.state.claimed.delete(issue.id);
     if (result.status === "completed") this.state.retryAttempts.delete(issue.id);
-    await this.transition(issue.id, result.status === "completed" ? this.config.feedback.transitions.completed_state : this.config.feedback.transitions.failed_state);
+    await this.transition(
+      issue.id,
+      result.status === "completed" ? this.config.feedback.transitions.completed_state : this.config.feedback.transitions.failed_state
+    );
     // Only comment on definitive outcomes: success, or a failure with no further retry queued.
     const willRetry = this.state.retryAttempts.has(issue.id);
     if (result.status === "completed") {
@@ -288,6 +365,12 @@ export class Orchestrator {
     }
 
     const planOutput = result.output ?? "";
+    this.audit("plan_created", {
+      issueId: issue.id,
+      issueIdentifier: issue.identifier,
+      message: `Plan created for ${issue.identifier} — awaiting review`,
+      metadata: { tokens: result.tokens, attempt: started.attempt }
+    });
     const planCommentId = await this.postCommentAndReadId(issue.id, formatPlanComment(issue, planOutput, this.config.approval_gates));
     const existing = this.state.awaitingReview.get(issue.id);
     const now = new Date();
@@ -298,7 +381,7 @@ export class Orchestrator {
       workspacePath: started.workspacePath ?? existing?.workspacePath ?? "",
       planOutput,
       planCommentId,
-      lastProcessedCommentId: mode === "revision" ? existing?.lastProcessedCommentId ?? null : planCommentId,
+      lastProcessedCommentId: mode === "revision" ? (existing?.lastProcessedCommentId ?? null) : planCommentId,
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
       attempt: started.attempt ?? existing?.attempt ?? 1
@@ -311,7 +394,7 @@ export class Orchestrator {
     if (!this.tracker.fetchComments) return;
     for (const entry of [...this.state.awaitingReview.values()]) {
       if (this.state.running.has(entry.issueId)) continue;
-      const issue = candidateIssues.find((candidate) => candidate.id === entry.issueId) ?? await this.issueForAwaiting(entry);
+      const issue = candidateIssues.find((candidate) => candidate.id === entry.issueId) ?? (await this.issueForAwaiting(entry));
       const comments = await this.tracker.fetchComments(entry.issueId);
       for (const comment of commentsAfter(comments, entry.lastProcessedCommentId)) {
         const command = parseApprovalCommand(comment.body, {
@@ -348,17 +431,28 @@ export class Orchestrator {
     this.state.awaitingReview.delete(entry.issueId);
     await this.persistAwaitingReview();
     const basePrompt = await this.basePromptForIssue(issue);
-    const started = await this.prepareRun(issue, { mode: "execution", promptOverride: renderExecutionPrompt(basePrompt, entry.planOutput) });
+    const started = await this.prepareRun(issue, {
+      mode: "execution",
+      promptOverride: renderExecutionPrompt(basePrompt, entry.planOutput)
+    });
     this.registerStartedRun(issue, started);
     this.trackRun(issue, started, "execution");
   }
 
-  private async startRevisionRun(issue: Issue, entry: AwaitingReviewEntry, feedback: string, lastProcessedCommentId: string): Promise<void> {
+  private async startRevisionRun(
+    issue: Issue,
+    entry: AwaitingReviewEntry,
+    feedback: string,
+    lastProcessedCommentId: string
+  ): Promise<void> {
     entry.lastProcessedCommentId = lastProcessedCommentId;
     entry.updatedAt = new Date();
     await this.persistAwaitingReview();
     const basePrompt = await this.basePromptForIssue(issue);
-    const started = await this.prepareRun(issue, { mode: "revision", promptOverride: renderRevisionPrompt(basePrompt, entry.planOutput, feedback) });
+    const started = await this.prepareRun(issue, {
+      mode: "revision",
+      promptOverride: renderRevisionPrompt(basePrompt, entry.planOutput, feedback)
+    });
     this.registerStartedRun(issue, started);
     this.trackRun(issue, started, "revision");
   }
@@ -367,6 +461,7 @@ export class Orchestrator {
     this.state.running.set(issue.id, {
       issue,
       threadId: started.threadId,
+      mode: started.mode,
       startedAt: new Date(),
       lastActivityAt: new Date(),
       stop: started.stop,
@@ -378,6 +473,12 @@ export class Orchestrator {
       skillSequence: started.skillSequence
     });
     this.state.claimed.add(issue.id);
+    this.audit("run_started", {
+      issueId: issue.id,
+      issueIdentifier: issue.identifier,
+      message: `Run started for ${issue.identifier} (mode: ${started.mode ?? "implementation"}, attempt ${started.attempt ?? 1})`,
+      metadata: { mode: started.mode, attempt: started.attempt, tools: started.tools?.map((t) => t.name) }
+    });
   }
 
   private async basePromptForIssue(issue: Issue): Promise<string> {
@@ -399,20 +500,22 @@ export class Orchestrator {
 
   private async issueForAwaiting(entry: AwaitingReviewEntry): Promise<Issue> {
     const [fetched] = await this.tracker.fetchIssueStatesByIds([entry.issueId]);
-    return fetched ?? {
-      id: entry.issueId,
-      identifier: entry.issue,
-      title: entry.title,
-      description: null,
-      priority: null,
-      state: this.config.approval_gates.awaiting_state ?? "",
-      branch_name: null,
-      url: null,
-      labels: [],
-      blocked_by: [],
-      created_at: null,
-      updated_at: null
-    };
+    return (
+      fetched ?? {
+        id: entry.issueId,
+        identifier: entry.issue,
+        title: entry.title,
+        description: null,
+        priority: null,
+        state: this.config.approval_gates.awaiting_state ?? "",
+        branch_name: null,
+        url: null,
+        labels: [],
+        blocked_by: [],
+        created_at: null,
+        updated_at: null
+      }
+    );
   }
 
   private findAwaiting(identifier: string): AwaitingReviewEntry | null {
@@ -442,6 +545,22 @@ export class Orchestrator {
       output: this.state.tokenTotals.output + tokens.output,
       total: this.state.tokenTotals.total + tokens.total
     };
+  }
+
+  private audit(
+    kind: AuditEventKind,
+    opts: { issueId?: string; issueIdentifier?: string; message: string; metadata?: Record<string, unknown> }
+  ): void {
+    const MAX_AUDIT_EVENTS = 500;
+    this.state.auditLog.push({
+      id: ++this.state.auditSeq,
+      timestamp: new Date().toISOString(),
+      kind,
+      ...opts
+    });
+    if (this.state.auditLog.length > MAX_AUDIT_EVENTS) {
+      this.state.auditLog.splice(0, this.state.auditLog.length - MAX_AUDIT_EVENTS);
+    }
   }
 
   private async comment(issueId: string, body: string): Promise<void> {
@@ -476,15 +595,22 @@ export class Orchestrator {
 
   private scheduleRetry(issue: Issue, started: StartedRun, result: TurnResult): void {
     const attempt = started.attempt ?? 1;
+    const delayMs = retryDelayMs(attempt, this.config.agent.max_retry_backoff_ms);
     this.state.retryAttempts.set(issue.id, {
       issueId: issue.id,
       attempt: attempt + 1,
-      dueAt: new Date(Date.now() + retryDelayMs(attempt, this.config.agent.max_retry_backoff_ms)),
+      dueAt: new Date(Date.now() + delayMs),
       metadata: {
         issue: issue.identifier,
         status: result.status,
         output: result.output
       }
+    });
+    this.audit("retry_scheduled", {
+      issueId: issue.id,
+      issueIdentifier: issue.identifier,
+      message: `Retry #${attempt + 1} scheduled for ${issue.identifier} in ${Math.round(delayMs / 1000)}s`,
+      metadata: { attempt: attempt + 1, status: result.status }
     });
   }
 
@@ -498,7 +624,9 @@ export class Orchestrator {
     for (const [issueId, result] of this.state.results) {
       if (issueId === identifier || result.issue === identifier) return issueId;
     }
-    const retry = [...this.state.retryAttempts.values()].find((entry) => entry.issueId === identifier || entry.metadata.issue === identifier);
+    const retry = [...this.state.retryAttempts.values()].find(
+      (entry) => entry.issueId === identifier || entry.metadata.issue === identifier
+    );
     return retry?.issueId ?? null;
   }
 
@@ -507,17 +635,26 @@ export class Orchestrator {
   }
 }
 
-function formatPlanComment(issue: Issue, plan: string, config: NorthstarConfig["approval_gates"]): string {
-  return [
+const formatPlanComment = (issue: Issue, plan: string, config: NorthstarConfig["approval_gates"]): string =>
+  [
     `Northstar plan for ${issue.identifier}:`,
     "",
     plan,
     "",
     `Reply with ${config.approval_trigger} to approve, ${config.revision_trigger} <feedback> to request changes, or ${config.rejection_trigger} to reject.`
   ].join("\n");
-}
 
-function latestMatchingComment(comments: TrackerComment[], body: string): TrackerComment | null {
+const latestMatchingComment = (comments: TrackerComment[], body: string): TrackerComment | null => {
   const matches = comments.filter((comment) => comment.body === body || comment.body.includes(body));
   return matches.at(-1) ?? comments.at(-1) ?? null;
-}
+};
+
+const planningModelForConfig = (config: NorthstarConfig): string | undefined => {
+  if (config.runtime.kind === "claude_code") return config.runtime.planning_model ?? config.runtime.model;
+  return undefined;
+};
+
+const apiKeyForConfig = (config: NorthstarConfig): string | undefined => {
+  if (config.runtime.kind === "claude_code") return config.runtime.api_key ?? process.env.ANTHROPIC_API_KEY;
+  return undefined;
+};

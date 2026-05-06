@@ -7,7 +7,7 @@ export interface AssembleIssueContextOpts {
   previousResult?: Pick<RunResultEntry, "status" | "output"> | null;
 }
 
-export function assembleIssueContext(opts: AssembleIssueContextOpts): string {
+export const assembleIssueContext = (opts: AssembleIssueContextOpts): string => {
   const lines = [
     "Northstar issue context:",
     `- Issue: ${opts.issue.identifier}: ${opts.issue.title}`,
@@ -17,13 +17,15 @@ export function assembleIssueContext(opts: AssembleIssueContextOpts): string {
     opts.issue.branch_name ? `- Branch: ${opts.issue.branch_name}` : null,
     opts.issue.labels.length > 0 ? `- Labels: ${opts.issue.labels.join(", ")}` : null,
     opts.issue.description ? `- Description: ${compact(opts.issue.description)}` : null,
-    opts.issue.blocked_by.length > 0 ? `- Blocked by: ${opts.issue.blocked_by.map((blocker) => `${blocker.identifier ?? blocker.id ?? "unknown"} (${blocker.state ?? "unknown"})`).join(", ")}` : null,
+    opts.issue.blocked_by.length > 0
+      ? `- Blocked by: ${opts.issue.blocked_by.map((blocker) => `${blocker.identifier ?? blocker.id ?? "unknown"} (${blocker.state ?? "unknown"})`).join(", ")}`
+      : null,
     opts.skillSequence && opts.skillSequence.length > 0 ? `- Requested skill gates: ${opts.skillSequence.join(", ")}` : null,
-    opts.previousResult ? `- Previous run: ${opts.previousResult.status}${opts.previousResult.output ? ` - ${compact(opts.previousResult.output)}` : ""}` : null
+    opts.previousResult
+      ? `- Previous run: ${opts.previousResult.status}${opts.previousResult.output ? ` - ${compact(opts.previousResult.output)}` : ""}`
+      : null
   ];
   return lines.filter((line): line is string => Boolean(line)).join("\n");
-}
+};
 
-function compact(value: string): string {
-  return value.replace(/\s+/g, " ").trim().slice(0, 1200);
-}
+const compact = (value: string): string => value.replace(/\s+/g, " ").trim().slice(0, 1200);

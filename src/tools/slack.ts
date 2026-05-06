@@ -18,6 +18,13 @@ export class SlackPostTool implements Tool {
     const input = args as Record<string, unknown>;
     const channel = String(input.channel ?? this.opts.defaultChannel ?? "");
     if (!channel) throw new Error("slack_post requires channel");
-    return jsonResult(await this.client.chat.postMessage({ channel, text: String(input.text), thread_ts: input.thread_ts as string | undefined, blocks: input.blocks as never }));
+    return jsonResult(
+      await this.client.chat.postMessage({
+        channel,
+        text: String(input.text),
+        thread_ts: input.thread_ts as string | undefined,
+        blocks: input.blocks as never
+      })
+    );
   }
 }

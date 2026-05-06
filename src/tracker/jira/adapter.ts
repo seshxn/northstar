@@ -1,5 +1,4 @@
-import type { Tracker } from "../types.js";
-import type { TrackerComment } from "../types.js";
+import type { Tracker, TrackerComment } from "../types.js";
 import type { Issue } from "../issue.js";
 import { JiraClient, type JiraRequest } from "./client.js";
 import { normalizeJiraIssue } from "./normalize.js";
@@ -18,7 +17,10 @@ export interface JiraTrackerConfig {
 export class JiraTracker implements Tracker {
   private readonly request: JiraRequest;
 
-  constructor(private readonly config: JiraTrackerConfig, request?: JiraRequest) {
+  constructor(
+    private readonly config: JiraTrackerConfig,
+    request?: JiraRequest
+  ) {
     const client = new JiraClient({ endpoint: config.endpoint, email: config.email, apiToken: config.api_token });
     this.request = request ?? client.request.bind(client);
   }
@@ -51,37 +53,45 @@ export class JiraTracker implements Tracker {
 
   async updateIssueState(issueId: string, stateName: string): Promise<void> {
     const transitions = await this.request(`/rest/api/3/issue/${encodeURIComponent(issueId)}/transitions`);
-    const transition = (transitions as { transitions?: Array<{ id: string; name: string }> }).transitions?.find((item) => item.name === stateName);
+    const transition = (transitions as { transitions?: Array<{ id: string; name: string }> }).transitions?.find(
+      (item) => item.name === stateName
+    );
     if (!transition) throw new Error(`Jira transition not found: ${stateName}`);
-    await this.request(`/rest/api/3/issue/${encodeURIComponent(issueId)}/transitions`, { method: "POST", body: JSON.stringify({ transition: { id: transition.id } }) });
+    await this.request(`/rest/api/3/issue/${encodeURIComponent(issueId)}/transitions`, {
+      method: "POST",
+      body: JSON.stringify({ transition: { id: transition.id } })
+    });
   }
 
   private async search(jql: string): Promise<Issue[]> {
     const path = `/rest/api/3/search?jql=${encodeURIComponent(jql)}&fields=summary,description,status,priority,labels,issuelinks,created,updated`;
     const response = await this.request(path, { method: "GET" });
     const issues = (response as { issues?: unknown[] }).issues ?? [];
-    return issues.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object")).map((item) => normalizeJiraIssue(item)).filter((issue): issue is Issue => issue != null);
+    return issues
+      .filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object"))
+      .map((item) => normalizeJiraIssue(item))
+      .filter((issue): issue is Issue => issue != null);
   }
 }
 
-function normalizeJiraComment(raw: unknown): TrackerComment | null {
+const normalizeJiraComment = (raw: unknown): TrackerComment | null => {
   if (!raw || typeof raw !== "object") return null;
   const record = raw as Record<string, unknown>;
   if (typeof record.id !== "string" || typeof record.created !== "string") return null;
-  const author = record.author && typeof record.author === "object" ? record.author as Record<string, unknown> : {};
+  const author = record.author && typeof record.author === "object" ? (record.author as Record<string, unknown>) : {};
   return {
     id: record.id,
     body: adfToText(record.body),
     created_at: record.created,
     author: typeof author.displayName === "string" ? author.displayName : undefined
   };
-}
+};
 
-function adfToText(value: unknown): string {
+const adfToText = (value: unknown): string => {
   if (typeof value === "string") return value;
   if (!value || typeof value !== "object") return "";
   const record = value as Record<string, unknown>;
   const text = typeof record.text === "string" ? record.text : "";
   const children = Array.isArray(record.content) ? record.content.map(adfToText).filter(Boolean).join("\n") : "";
   return [text, children].filter(Boolean).join(text && children ? "\n" : "");
-}
+};

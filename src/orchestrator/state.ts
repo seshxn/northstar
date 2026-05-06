@@ -2,9 +2,35 @@ import type { Issue } from "../tracker/issue.js";
 import type { RuntimeEvent, TurnResult } from "../runtime/types.js";
 import type { AwaitingReviewEntry } from "./approval-gates.js";
 
+export type RunMode = "implementation" | "planning" | "revision" | "execution";
+
+export type AuditEventKind =
+  | "issue_dispatched"
+  | "run_started"
+  | "plan_created"
+  | "dependency_detected"
+  | "run_completed"
+  | "run_failed"
+  | "approval_triggered"
+  | "feedback_triggered"
+  | "rejection_triggered"
+  | "retry_scheduled"
+  | "issue_stopped";
+
+export interface AuditEvent {
+  id: number;
+  timestamp: string;
+  kind: AuditEventKind;
+  issueId?: string;
+  issueIdentifier?: string;
+  message: string;
+  metadata?: Record<string, unknown>;
+}
+
 export interface RunningEntry {
   issue: Issue;
   threadId: string;
+  mode?: RunMode;
   startedAt: Date;
   lastActivityAt: Date;
   stop: () => Promise<void>;
@@ -64,31 +90,35 @@ export interface OrchestratorState {
   awaitingReview: Map<string, AwaitingReviewEntry>;
   tokenTotals: TokenTotals;
   results: Map<string, RunResultEntry>;
+  detectedDependencies: Map<string, string[]>;
+  auditLog: AuditEvent[];
+  auditSeq: number;
 }
 
-export function createInitialState(opts: {
+export const createInitialState = (opts: {
   pollIntervalMs?: number;
   maxConcurrentAgents: number;
   activeStates: string[];
   terminalStates: string[];
   maxConcurrentAgentsByState?: Record<string, number>;
-}): OrchestratorState {
-  return {
-    pollIntervalMs: opts.pollIntervalMs ?? 30_000,
-    maxConcurrentAgents: opts.maxConcurrentAgents,
-    activeStates: new Set(opts.activeStates.map(normalizeState)),
-    terminalStates: new Set(opts.terminalStates.map(normalizeState)),
-    maxConcurrentAgentsByState: new Map(Object.entries(opts.maxConcurrentAgentsByState ?? {}).map(([key, value]) => [normalizeState(key), value])),
-    running: new Map(),
-    completed: new Set(),
-    claimed: new Set(),
-    retryAttempts: new Map(),
-    awaitingReview: new Map(),
-    tokenTotals: { input: 0, output: 0, total: 0 },
-    results: new Map()
-  };
-}
+}): OrchestratorState => ({
+  pollIntervalMs: opts.pollIntervalMs ?? 30_000,
+  maxConcurrentAgents: opts.maxConcurrentAgents,
+  activeStates: new Set(opts.activeStates.map(normalizeState)),
+  terminalStates: new Set(opts.terminalStates.map(normalizeState)),
+  maxConcurrentAgentsByState: new Map(
+    Object.entries(opts.maxConcurrentAgentsByState ?? {}).map(([key, value]) => [normalizeState(key), value])
+  ),
+  running: new Map(),
+  completed: new Set(),
+  claimed: new Set(),
+  retryAttempts: new Map(),
+  awaitingReview: new Map(),
+  tokenTotals: { input: 0, output: 0, total: 0 },
+  results: new Map(),
+  detectedDependencies: new Map(),
+  auditLog: [],
+  auditSeq: 0
+});
 
-export function normalizeState(state: string | null | undefined): string {
-  return (state ?? "").toLowerCase();
-}
+export const normalizeState = (state: string | null | undefined): string => (state ?? "").toLowerCase();

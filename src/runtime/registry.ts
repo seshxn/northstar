@@ -5,7 +5,7 @@ import { ClaudeCodeRuntime } from "./claude-code/sdk.js";
 import { BedrockAnthropicRuntime } from "./bedrock/bedrock.js";
 import { GeminiRuntime } from "./gemini/sdk.js";
 
-export function runtimeForConfig(config: RuntimeConfig): Runtime {
+export const runtimeForConfig = (config: RuntimeConfig): Runtime => {
   switch (config.kind) {
     case "codex_app_server":
       return new CodexAppServerRuntime(config);
@@ -16,4 +16,4 @@ export function runtimeForConfig(config: RuntimeConfig): Runtime {
     case "gemini":
       return new GeminiRuntime(config);
   }
-}
+};

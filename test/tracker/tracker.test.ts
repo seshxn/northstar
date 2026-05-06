@@ -30,11 +30,35 @@ describe("SPEC 17.3 tracker adapters", () => {
 
   test("Linear adapter paginates candidate issue queries", async () => {
     const pages = [
-      { data: { issues: { nodes: [{ id: "1", identifier: "SYM-1", title: "A", state: { name: "Todo" } }], pageInfo: { hasNextPage: true, endCursor: "next" } } } },
-      { data: { issues: { nodes: [{ id: "2", identifier: "SYM-2", title: "B", state: { name: "Todo" } }], pageInfo: { hasNextPage: false, endCursor: null } } } }
+      {
+        data: {
+          issues: {
+            nodes: [{ id: "1", identifier: "SYM-1", title: "A", state: { name: "Todo" } }],
+            pageInfo: { hasNextPage: true, endCursor: "next" }
+          }
+        }
+      },
+      {
+        data: {
+          issues: {
+            nodes: [{ id: "2", identifier: "SYM-2", title: "B", state: { name: "Todo" } }],
+            pageInfo: { hasNextPage: false, endCursor: null }
+          }
+        }
+      }
     ];
     const graphql = vi.fn(async () => pages.shift());
-    const tracker = new LinearTracker({ kind: "linear", endpoint: "https://linear", api_key: "token", project_slug: "SYM", active_states: ["Todo"], terminal_states: ["Done"] }, graphql);
+    const tracker = new LinearTracker(
+      {
+        kind: "linear",
+        endpoint: "https://linear",
+        api_key: "token",
+        project_slug: "SYM",
+        active_states: ["Todo"],
+        terminal_states: ["Done"]
+      },
+      graphql
+    );
 
     const issues = await tracker.fetchCandidateIssues();
 
@@ -58,7 +82,17 @@ describe("SPEC 17.3 tracker adapters", () => {
         }
       };
     });
-    const tracker = new LinearTracker({ kind: "linear", endpoint: "https://linear", api_key: "token", project_slug: "SYM", active_states: ["Todo"], terminal_states: ["Done"] }, graphql);
+    const tracker = new LinearTracker(
+      {
+        kind: "linear",
+        endpoint: "https://linear",
+        api_key: "token",
+        project_slug: "SYM",
+        active_states: ["Todo"],
+        terminal_states: ["Done"]
+      },
+      graphql
+    );
 
     await tracker.createComment("lin-1", "plan");
     const comments = await tracker.fetchComments("lin-1");
@@ -77,7 +111,12 @@ describe("SPEC 17.3 tracker adapters", () => {
         status: { name: "In Progress" },
         priority: { name: "High", id: "2" },
         labels: ["API", "Bug"],
-        issuelinks: [{ type: { outward: "blocks", inward: "is blocked by" }, inwardIssue: { id: "10000", key: "SYM-2", fields: { status: { name: "Todo" } } } }],
+        issuelinks: [
+          {
+            type: { outward: "blocks", inward: "is blocked by" },
+            inwardIssue: { id: "10000", key: "SYM-2", fields: { status: { name: "Todo" } } }
+          }
+        ],
         created: "2026-01-01T00:00:00.000+0000",
         updated: "2026-01-02T00:00:00.000+0000"
       }
@@ -95,7 +134,18 @@ describe("SPEC 17.3 tracker adapters", () => {
       requests.push(`${path} ${init?.method ?? "GET"}`);
       return { issues: [{ id: "10001", key: "SYM-1", fields: { summary: "A", status: { name: "Todo" } } }] };
     });
-    const tracker = new JiraTracker({ kind: "jira", endpoint: "https://jira", email: "dev@example.com", api_token: "token", project_key: "SYM", active_states: ["Todo"], terminal_states: ["Done"] }, request);
+    const tracker = new JiraTracker(
+      {
+        kind: "jira",
+        endpoint: "https://jira",
+        email: "dev@example.com",
+        api_token: "token",
+        project_key: "SYM",
+        active_states: ["Todo"],
+        terminal_states: ["Done"]
+      },
+      request
+    );
 
     expect((await tracker.fetchCandidateIssues())[0]?.identifier).toBe("SYM-1");
     expect((await tracker.fetchIssueStatesByIds(["SYM-1"]))[0]?.state).toBe("Todo");
@@ -105,14 +155,27 @@ describe("SPEC 17.3 tracker adapters", () => {
 
   test("Jira adapter fetches comments and extracts ADF text", async () => {
     const request = vi.fn(async () => ({
-      comments: [{
-        id: "100",
-        created: "2026-01-01T00:00:00.000+0000",
-        author: { displayName: "Reviewer" },
-        body: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "/approve" }] }] }
-      }]
+      comments: [
+        {
+          id: "100",
+          created: "2026-01-01T00:00:00.000+0000",
+          author: { displayName: "Reviewer" },
+          body: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "/approve" }] }] }
+        }
+      ]
     }));
-    const tracker = new JiraTracker({ kind: "jira", endpoint: "https://jira", email: "dev@example.com", api_token: "token", project_key: "SYM", active_states: ["Todo"], terminal_states: ["Done"] }, request);
+    const tracker = new JiraTracker(
+      {
+        kind: "jira",
+        endpoint: "https://jira",
+        email: "dev@example.com",
+        api_token: "token",
+        project_key: "SYM",
+        active_states: ["Todo"],
+        terminal_states: ["Done"]
+      },
+      request
+    );
 
     const comments = await tracker.fetchComments("SYM-1");
 
@@ -152,7 +215,10 @@ describe("SPEC 17.3 tracker adapters", () => {
     const page2 = [makeItem(101), { number: 102, title: "PR", state: "open", labels: [], pull_request: {} }];
     let call = 0;
     const request = vi.fn(async () => (call++ === 0 ? page1 : page2));
-    const tracker = new GitHubTracker({ kind: "github", repo: "acme/repo", labels: [], active_states: ["open"], terminal_states: ["closed"] }, request);
+    const tracker = new GitHubTracker(
+      { kind: "github", repo: "acme/repo", labels: [], active_states: ["open"], terminal_states: ["closed"] },
+      request
+    );
 
     const issues = await tracker.fetchCandidateIssues();
 
@@ -170,7 +236,10 @@ describe("SPEC 17.3 tracker adapters", () => {
       }
       return null;
     });
-    const tracker = new GitHubTracker({ kind: "github", repo: "acme/repo", labels: [], active_states: ["open"], terminal_states: ["closed"] }, request);
+    const tracker = new GitHubTracker(
+      { kind: "github", repo: "acme/repo", labels: [], active_states: ["open"], terminal_states: ["closed"] },
+      request
+    );
 
     await tracker.createComment("5", "done");
     await tracker.updateIssueState("5", "closed");
@@ -182,13 +251,18 @@ describe("SPEC 17.3 tracker adapters", () => {
   });
 
   test("GitHub adapter fetches issue comments", async () => {
-    const request = vi.fn(async () => [{
-      id: 123,
-      body: "/approve",
-      created_at: "2026-01-01T00:00:00Z",
-      user: { login: "lead" }
-    }]);
-    const tracker = new GitHubTracker({ kind: "github", repo: "acme/repo", labels: [], active_states: ["open"], terminal_states: ["closed"] }, request);
+    const request = vi.fn(async () => [
+      {
+        id: 123,
+        body: "/approve",
+        created_at: "2026-01-01T00:00:00Z",
+        user: { login: "lead" }
+      }
+    ]);
+    const tracker = new GitHubTracker(
+      { kind: "github", repo: "acme/repo", labels: [], active_states: ["open"], terminal_states: ["closed"] },
+      request
+    );
 
     const comments = await tracker.fetchComments("5");
 
@@ -198,8 +272,14 @@ describe("SPEC 17.3 tracker adapters", () => {
 
   test("GitHub adapter fetchIssuesByStates maps open/closed to GitHub state param", async () => {
     const paths: string[] = [];
-    const request = vi.fn(async (path: string) => { paths.push(path); return []; });
-    const tracker = new GitHubTracker({ kind: "github", repo: "acme/repo", labels: [], active_states: ["open"], terminal_states: ["closed"] }, request);
+    const request = vi.fn(async (path: string) => {
+      paths.push(path);
+      return [];
+    });
+    const tracker = new GitHubTracker(
+      { kind: "github", repo: "acme/repo", labels: [], active_states: ["open"], terminal_states: ["closed"] },
+      request
+    );
 
     await tracker.fetchIssuesByStates(["open"]);
     await tracker.fetchIssuesByStates(["closed"]);

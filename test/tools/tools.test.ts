@@ -10,7 +10,14 @@ import { toGeminiToolSpecs } from "../../src/tools/adapters/gemini.js";
 describe("SPEC 10.5 and integration tool contracts", () => {
   test("registers only enabled integration tools and preserves strict schemas across runtime adapters", () => {
     const tools = buildTools({
-      tracker: { kind: "linear", endpoint: "https://linear", api_key: "token", project_slug: "SYM", active_states: ["Todo"], terminal_states: ["Done"] },
+      tracker: {
+        kind: "linear",
+        endpoint: "https://linear",
+        api_key: "token",
+        project_slug: "SYM",
+        active_states: ["Todo"],
+        terminal_states: ["Done"]
+      },
       integrations: {
         github: { enabled: true, token: "gh", default_repo: "openai/northstar" },
         slack: { enabled: false }
@@ -28,7 +35,11 @@ describe("SPEC 10.5 and integration tool contracts", () => {
     const request = vi.fn(async () => ({ errors: [{ message: "bad" }] }));
     const tool = new LinearGraphqlTool({ endpoint: "https://linear", apiKey: "token", request });
 
-    const result = await tool.execute("query { viewer { id } }", { issue: undefined as never, workspacePath: "/tmp/ws", signal: new AbortController().signal });
+    const result = await tool.execute("query { viewer { id } }", {
+      issue: undefined as never,
+      workspacePath: "/tmp/ws",
+      signal: new AbortController().signal
+    });
 
     expect(request).toHaveBeenCalledWith("query { viewer { id } }", {});
     expect(result.success).toBe(false);

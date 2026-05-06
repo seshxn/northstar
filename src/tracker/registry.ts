@@ -4,8 +4,8 @@ import { LinearTracker } from "./linear/adapter.js";
 import { JiraTracker } from "./jira/adapter.js";
 import { GitHubTracker } from "./github/adapter.js";
 
-export function trackerForConfig(config: NorthstarConfig): Tracker {
+export const trackerForConfig = (config: NorthstarConfig): Tracker => {
   if (config.tracker.kind === "jira") return new JiraTracker(config.tracker);
   if (config.tracker.kind === "github") return new GitHubTracker(config.tracker);
   return new LinearTracker(config.tracker);
-}
+};

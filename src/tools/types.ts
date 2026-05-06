@@ -19,7 +19,7 @@ export interface Tool {
   execute(args: unknown, ctx: ToolContext): Promise<ToolResult>;
 }
 
-export function jsonResult(payload: unknown, success = true): ToolResult {
+export const jsonResult = (payload: unknown, success = true): ToolResult => {
   const output = typeof payload === "string" ? payload : JSON.stringify(payload, null, 2);
   return { success, output, contentItems: [{ type: "inputText", text: output }] };
-}
+};

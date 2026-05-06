@@ -7,7 +7,7 @@ export interface HookContext {
   timeoutMs: number;
 }
 
-export function runHook(command: string | undefined, ctx: HookContext): Promise<void> {
+export const runHook = (command: string | undefined, ctx: HookContext): Promise<void> => {
   if (!command) return Promise.resolve();
   return new Promise((resolve, reject) => {
     const child = spawn("sh", ["-lc", command], {
@@ -25,8 +25,12 @@ export function runHook(command: string | undefined, ctx: HookContext): Promise<
       child.kill("SIGKILL");
       reject(new Error(`workspace hook timed out after ${ctx.timeoutMs}ms`));
     }, ctx.timeoutMs);
-    child.stdout.on("data", (chunk) => { output += chunk; });
-    child.stderr.on("data", (chunk) => { output += chunk; });
+    child.stdout.on("data", (chunk) => {
+      output += chunk;
+    });
+    child.stderr.on("data", (chunk) => {
+      output += chunk;
+    });
     child.on("error", (error) => {
       clearTimeout(timer);
       reject(error);
@@ -36,4 +40,4 @@ export function runHook(command: string | undefined, ctx: HookContext): Promise<
       code === 0 ? resolve() : reject(new Error(`workspace hook failed with exit ${code}: ${output.slice(0, 2048)}`));
     });
   });
-}
+};

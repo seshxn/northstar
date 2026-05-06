@@ -44,12 +44,13 @@ export class JiraRestTool implements Tool {
 
   private headers(): Record<string, string> {
     const headers: Record<string, string> = { accept: "application/json", "content-type": "application/json" };
-    if (this.opts.email && this.opts.apiToken) headers.authorization = `Basic ${Buffer.from(`${this.opts.email}:${this.opts.apiToken}`).toString("base64")}`;
+    if (this.opts.email && this.opts.apiToken)
+      headers.authorization = `Basic ${Buffer.from(`${this.opts.email}:${this.opts.apiToken}`).toString("base64")}`;
     return headers;
   }
 }
 
-function appendQuery(path: string, query: unknown): string {
+const appendQuery = (path: string, query: unknown): string => {
   if (!query || typeof query !== "object" || Array.isArray(query)) return path;
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(query)) {
@@ -57,4 +58,4 @@ function appendQuery(path: string, query: unknown): string {
   }
   const suffix = params.toString();
   return suffix ? `${path}?${suffix}` : path;
-}
+};

@@ -22,11 +22,14 @@ export class OrchestratorService {
   }
 
   async refresh(): Promise<void> {
-    const next = this.queue.then(async () => {
-      await this.orchestrator.tick();
-    }, async () => {
-      await this.orchestrator.tick();
-    });
+    const next = this.queue.then(
+      async () => {
+        await this.orchestrator.tick();
+      },
+      async () => {
+        await this.orchestrator.tick();
+      }
+    );
     this.queue = next.catch(() => undefined);
     await next;
   }

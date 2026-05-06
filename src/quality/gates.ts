@@ -10,7 +10,7 @@ const gateInstructions: Record<string, string> = {
   docs: "Check whether user-facing, operator-facing, and agent-facing documentation need updates."
 };
 
-export function qualityGateSequenceForIssue(config: QualityGatesConfig, issue: Pick<Issue, "labels">): string[] {
+export const qualityGateSequenceForIssue = (config: QualityGatesConfig, issue: Pick<Issue, "labels">): string[] => {
   if (!config.enabled) return [];
   const sequence: string[] = [];
   for (const gate of config.default_sequence) pushUnique(sequence, gate);
@@ -18,18 +18,23 @@ export function qualityGateSequenceForIssue(config: QualityGatesConfig, issue: P
     for (const gate of config.label_sequences[label.toLowerCase()] ?? []) pushUnique(sequence, gate);
   }
   return sequence;
-}
+};
 
-export function renderQualityGatePrompt(gate: string, issue: Pick<Issue, "identifier" | "title">, previousOutput: string | undefined): string {
-  return [
+export const renderQualityGatePrompt = (
+  gate: string,
+  issue: Pick<Issue, "identifier" | "title">,
+  previousOutput: string | undefined
+): string =>
+  [
     `Quality gate: ${gate}`,
     `Issue: ${issue.identifier}: ${issue.title}`,
     gateInstructions[gate] ?? `Run the ${gate} quality gate using the local agent workflow if available.`,
     "Do not make unrelated changes. Report pass/fail and concrete evidence.",
     previousOutput ? `Previous turn output:\n${previousOutput.slice(0, 4000)}` : null
-  ].filter(Boolean).join("\n\n");
-}
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 
-function pushUnique(values: string[], value: string): void {
+const pushUnique = (values: string[], value: string): void => {
   if (!values.includes(value)) values.push(value);
-}
+};

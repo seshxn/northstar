@@ -13,7 +13,7 @@ export interface ModelResponse {
   usage?: { inputTokens?: number; outputTokens?: number };
 }
 
-export async function runFunctionCallingLoop(opts: {
+export const runFunctionCallingLoop = async (opts: {
   prompt: string;
   issue: Issue;
   workspacePath: string;
@@ -22,7 +22,7 @@ export async function runFunctionCallingLoop(opts: {
   callModel: (messages: HarnessMessage[], tools: Tool[], signal: AbortSignal) => Promise<ModelResponse>;
   onEvent: (event: RuntimeEvent) => void;
   maxTurns?: number;
-}): Promise<TurnResult> {
+}): Promise<TurnResult> => {
   const messages: HarnessMessage[] = [{ role: "user", content: opts.prompt }];
   let totals = { input: 0, output: 0, total: 0 };
   for (let turn = 0; turn < (opts.maxTurns ?? 50); turn += 1) {
@@ -31,7 +31,8 @@ export async function runFunctionCallingLoop(opts: {
     messages.push(response.message);
     totals = addUsage(totals, response.usage);
     opts.onEvent({ type: "runtime_message", timestamp: new Date().toISOString(), data: { stopReason: response.stopReason } });
-    if (response.stopReason === "end_turn") return { status: "completed", output: textFromContent(response.message.content), tokens: totals };
+    if (response.stopReason === "end_turn")
+      return { status: "completed", output: textFromContent(response.message.content), tokens: totals };
     if (response.stopReason !== "tool_use") return { status: "failed", output: textFromContent(response.message.content), tokens: totals };
     for (const call of toolCalls(response.message.content)) {
       const tool = opts.tools.find((candidate) => candidate.name === call.name);
@@ -44,9 +45,9 @@ export async function runFunctionCallingLoop(opts: {
     }
   }
   return { status: "timeout", tokens: totals };
-}
+};
 
-function toolCalls(content: unknown): Array<{ id: string; name: string; input: unknown }> {
+const toolCalls = (content: unknown): Array<{ id: string; name: string; input: unknown }> => {
   if (!Array.isArray(content)) return [];
   return content.flatMap((item) => {
     if (!item || typeof item !== "object") return [];
@@ -55,16 +56,22 @@ function toolCalls(content: unknown): Array<{ id: string; name: string; input: u
       ? [{ id: String(record.id ?? record.name), name: record.name, input: record.input }]
       : [];
   });
-}
+};
 
-function textFromContent(content: unknown): string {
+const textFromContent = (content: unknown): string => {
   if (typeof content === "string") return content;
-  if (Array.isArray(content)) return content.map((item) => item && typeof item === "object" && "text" in item ? String((item as { text: unknown }).text) : "").join("");
+  if (Array.isArray(content))
+    return content
+      .map((item) => (item && typeof item === "object" && "text" in item ? String((item as { text: unknown }).text) : ""))
+      .join("");
   return JSON.stringify(content);
-}
+};
 
-function addUsage(current: { input: number; output: number; total: number }, usage: ModelResponse["usage"]) {
+const addUsage = (
+  current: { input: number; output: number; total: number },
+  usage: ModelResponse["usage"]
+): { input: number; output: number; total: number } => {
   const input = current.input + (usage?.inputTokens ?? 0);
   const output = current.output + (usage?.outputTokens ?? 0);
   return { input, output, total: input + output };
-}
+};

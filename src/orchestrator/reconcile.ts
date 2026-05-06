@@ -2,7 +2,7 @@ import type { Issue } from "../tracker/issue.js";
 import type { OrchestratorState } from "./state.js";
 import { normalizeState } from "./state.js";
 
-export async function reconcileRunningIssues(state: OrchestratorState, refreshedIssues: Issue[]): Promise<OrchestratorState> {
+export const reconcileRunningIssues = async (state: OrchestratorState, refreshedIssues: Issue[]): Promise<OrchestratorState> => {
   const visible = new Map(refreshedIssues.map((issue) => [issue.id, issue]));
   for (const [issueId, running] of [...state.running.entries()]) {
     const issue = visible.get(issueId);
@@ -16,9 +16,9 @@ export async function reconcileRunningIssues(state: OrchestratorState, refreshed
     }
   }
   return state;
-}
+};
 
-export async function restartStalledIssues(state: OrchestratorState, now: Date, stallTimeoutMs: number): Promise<string[]> {
+export const restartStalledIssues = async (state: OrchestratorState, now: Date, stallTimeoutMs: number): Promise<string[]> => {
   const restarted: string[] = [];
   if (stallTimeoutMs <= 0) return restarted;
   for (const [issueId, running] of [...state.running.entries()]) {
@@ -30,4 +30,4 @@ export async function restartStalledIssues(state: OrchestratorState, now: Date, 
     }
   }
   return restarted;
-}
+};

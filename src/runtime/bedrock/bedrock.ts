@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { BedrockRuntimeClient, ConverseCommand } from "@aws-sdk/client-bedrock-runtime";
 import type { ConverseCommandInput } from "@aws-sdk/client-bedrock-runtime";
-import type { Runtime, Session, StartSessionOpts, RunTurnOpts, TurnResult } from "../types.js";
+import type { Runtime, RuntimeRunMode, Session, StartSessionOpts, RunTurnOpts, TurnResult } from "../types.js";
 import { runFunctionCallingLoop, type HarnessMessage, type ModelResponse } from "../harness.js";
 import { builtinTools } from "./builtin-tools.js";
 import type { Tool } from "../../tools/types.js";
@@ -10,7 +10,9 @@ export class BedrockAnthropicRuntime implements Runtime {
   readonly kind = "bedrock_anthropic";
   readonly client: BedrockRuntimeClient;
 
-  constructor(private readonly config: { model_id: string; region?: string; max_tokens?: number; builtin_tools?: string[] }) {
+  constructor(
+    private readonly config: { model_id: string; planning_model?: string; region?: string; max_tokens?: number; builtin_tools?: string[] }
+  ) {
     this.client = new BedrockRuntimeClient({ region: config.region ?? "us-west-2" });
   }
 
@@ -25,7 +27,7 @@ class BedrockSession implements Session {
 
   constructor(
     private readonly client: BedrockRuntimeClient,
-    private readonly config: { model_id: string; max_tokens?: number },
+    private readonly config: { model_id: string; planning_model?: string; max_tokens?: number },
     private readonly workspacePath: string,
     private readonly tools: Tool[]
   ) {}
@@ -37,7 +39,7 @@ class BedrockSession implements Session {
       workspacePath: this.workspacePath,
       signal: opts.signal,
       tools: this.tools,
-      callModel: (messages, tools, signal) => callBedrockConverse(this.client, this.config, messages, tools, signal),
+      callModel: (messages, tools, signal) => callBedrockConverse(this.client, this.config, messages, tools, signal, opts.mode),
       onEvent: opts.onEvent
     });
   }
@@ -45,15 +47,16 @@ class BedrockSession implements Session {
   async stop(): Promise<void> {}
 }
 
-async function callBedrockConverse(
+const callBedrockConverse = async (
   client: BedrockRuntimeClient,
-  config: { model_id: string; max_tokens?: number },
+  config: { model_id: string; planning_model?: string; max_tokens?: number },
   messages: HarnessMessage[],
   tools: Tool[],
-  signal: AbortSignal
-): Promise<ModelResponse> {
+  signal: AbortSignal,
+  mode?: RuntimeRunMode
+): Promise<ModelResponse> => {
   const input: ConverseCommandInput = {
-    modelId: config.model_id,
+    modelId: modelIdForTurn(config, mode),
     messages: toConverseMessages(messages) as ConverseCommandInput["messages"],
     inferenceConfig: { maxTokens: config.max_tokens ?? 8192 }
   };
@@ -87,18 +90,23 @@ async function callBedrockConverse(
     message: { role: "assistant", content },
     usage: { inputTokens: result.usage?.inputTokens, outputTokens: result.usage?.outputTokens }
   };
-}
+};
 
-function mapBedrockStopReason(reason: string): ModelResponse["stopReason"] {
+export const modelIdForTurn = (config: { model_id: string; planning_model?: string }, mode?: RuntimeRunMode): string => {
+  if ((mode === "planning" || mode === "revision") && config.planning_model) return config.planning_model;
+  return config.model_id;
+};
+
+const mapBedrockStopReason = (reason: string): ModelResponse["stopReason"] => {
   if (reason === "tool_use") return "tool_use";
   if (reason === "max_tokens") return "max_tokens";
   if (reason === "end_turn") return "end_turn";
   return "error";
-}
+};
 
 export type ConverseMessage = { role: "user" | "assistant"; content: unknown[] };
 
-export function toConverseMessages(messages: HarnessMessage[]): ConverseMessage[] {
+export const toConverseMessages = (messages: HarnessMessage[]): ConverseMessage[] => {
   const result: ConverseMessage[] = [];
   let i = 0;
   while (i < messages.length) {
@@ -127,7 +135,8 @@ export function toConverseMessages(messages: HarnessMessage[]): ConverseMessage[
           role: "assistant",
           content: (content as Array<Record<string, unknown>>).map((item) => {
             if (item.type === "text") return { text: String(item.text ?? "") };
-            if (item.type === "tool_use") return { toolUse: { toolUseId: String(item.id ?? item.name), name: String(item.name), input: item.input } };
+            if (item.type === "tool_use")
+              return { toolUse: { toolUseId: String(item.id ?? item.name), name: String(item.name), input: item.input } };
             return { text: JSON.stringify(item) };
           })
         });
@@ -138,4 +147,4 @@ export function toConverseMessages(messages: HarnessMessage[]): ConverseMessage[
     }
   }
   return result;
-}
+};

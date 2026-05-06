@@ -14,11 +14,10 @@ export const secretKeys = [
   "token"
 ];
 
-export function createLogger() {
-  return pino({
+export const createLogger = () =>
+  pino({
     redact: {
       paths: secretKeys.map((key) => `*.${key}`),
       censor: "[REDACTED]"
     }
   });
-}
