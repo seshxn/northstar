@@ -132,7 +132,8 @@ export const Sheet = ({ open, children, onOpenChange }: { open: boolean; childre
           </DialogPrimitive.Overlay>
           <DialogPrimitive.Content asChild forceMount>
             <motion.div
-              className="fixed right-0 top-0 z-[21] h-full w-[min(92vw,560px)] max-w-[560px] overflow-y-auto border-l border-[var(--border)] bg-[var(--popover)] text-[var(--popover-foreground)] p-5 shadow-[var(--shadow)]"
+              className="fixed right-0 top-0 z-[21] h-full w-[min(92vw,560px)] max-w-[560px] overflow-y-auto border-l border-[var(--border)] bg-[var(--popover)] p-5 shadow-[var(--shadow)]"
+              style={{ color: "var(--popover-foreground)" }}
               initial={{ x: "100%", opacity: 0.7 }}
               animate={{ x: 0, opacity: 1 }}
               exit={{ x: "100%", opacity: 0 }}
@@ -252,6 +253,7 @@ interface ToastMessage {
   title: string;
   description?: string;
   tone?: "default" | "error";
+  action?: { label: string; onClick: () => void };
 }
 
 const ToastContext = createContext<{ push: (message: Omit<ToastMessage, "id">) => void } | null>(null);
@@ -278,7 +280,7 @@ export const ToastProvider = ({ children }: { children: ReactNode }) => {
               "flex items-start justify-between gap-3 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--popover)] p-3 shadow-[var(--shadow)]",
               message.tone === "error" && "toast-error-border"
             )}
-            duration={3600}
+            duration={message.action ? 8000 : 3600}
             key={message.id}
             onOpenChange={(open) => {
               if (!open) setMessages((items) => items.filter((item) => item.id !== message.id));
@@ -289,6 +291,14 @@ export const ToastProvider = ({ children }: { children: ReactNode }) => {
               {message.description ? (
                 <ToastPrimitive.Description className="text-[13px] text-[var(--muted-foreground)] mt-0.5">{message.description}</ToastPrimitive.Description>
               ) : null}
+              {message.action && (
+                <button
+                  className="mt-1.5 text-xs font-semibold text-[var(--primary)] hover:underline bg-transparent border-0 cursor-pointer p-0 text-left"
+                  onClick={() => { message.action!.onClick(); }}
+                >
+                  {message.action.label}
+                </button>
+              )}
             </div>
             <ToastPrimitive.Close className="bg-transparent border-0 text-[var(--muted-foreground)] cursor-pointer" aria-label="Close notification">
               <X size={14} />
