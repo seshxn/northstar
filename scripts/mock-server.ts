@@ -765,7 +765,10 @@ The platform must ensure that data from one tenant is never visible to users of 
   ]
 };
 
-const SETTINGS = {
+const SETTINGS: {
+  runtime: { kind: string; executionModel: string; planningModel: string };
+  tracker: { kind: string; jql: string | null; project_key: string | null; active_states: string[]; backlog_states: string[] };
+} = {
   runtime: {
     kind: "claude_code",
     executionModel: "claude-sonnet-4-6",
