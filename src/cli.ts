@@ -81,6 +81,9 @@ export const main = async (argv = process.argv): Promise<void> => {
       if (patch.tracker?.jql !== undefined && config.tracker.kind === "jira") {
         (config.tracker as Record<string, unknown>).jql = patch.tracker.jql;
       }
+      if (patch.tracker?.backlog_states !== undefined) {
+        (config.tracker as Record<string, unknown>).backlog_states = patch.tracker.backlog_states;
+      }
     },
     createPullRequest: async (identifier, input) => {
       if (!prClient || !config.pull_request.enabled) return null;
@@ -147,7 +150,8 @@ const settingsForConfig = (config: ReturnType<typeof parseWorkflowConfig>): Sett
       kind: tracker.kind,
       jql: "jql" in tracker ? (tracker.jql ?? null) : null,
       project_key: "project_key" in tracker ? (tracker.project_key ?? null) : null,
-      active_states: tracker.active_states
+      active_states: tracker.active_states,
+      backlog_states: tracker.backlog_states
     }
   };
 };

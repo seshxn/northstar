@@ -7,6 +7,7 @@ export const snapshotState = (state: OrchestratorState) => ({
     issue: entry.issue.identifier,
     issueId: entry.issue.id,
     threadId: entry.threadId,
+    mode: entry.mode ?? null,
     startedAt: entry.startedAt.toISOString(),
     lastActivityAt: entry.lastActivityAt.toISOString(),
     workspacePath: entry.workspacePath,
@@ -51,6 +52,7 @@ export const snapshotState = (state: OrchestratorState) => ({
     completedAt: entry.completedAt.toISOString(),
     attempt: entry.attempt,
     error: entry.error,
-    gateResults: entry.gateResults
+    gateResults: entry.gateResults,
+    mode: entry.mode ?? null
   }))
 });

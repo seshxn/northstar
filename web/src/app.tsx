@@ -1,4 +1,4 @@
-import { DndContext, type DragEndEvent, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
+import { DndContext, type DragEndEvent, PointerSensor, closestCenter, useSensor, useSensors } from "@dnd-kit/core";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   Command,
@@ -20,6 +20,7 @@ import { BoardPage } from "./pages/BoardPage";
 import { RunsPage } from "./pages/RunsPage";
 import { PullRequestPage } from "./pages/PullRequestPage";
 import { ActivityPage } from "./pages/ActivityPage";
+import { RefinementsPage } from "./pages/RefinementsPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import {
   approvePlan,
@@ -80,6 +81,8 @@ const NorthstarApp = () => {
     refresh,
     handleRefresh,
     runAction,
+    optimisticMoveCard,
+    setDragging,
   } = useNorthstarState();
 
   const { push } = useToast();
@@ -123,12 +126,11 @@ const NorthstarApp = () => {
       push({ title: "Move blocked", description: `${targetColumn.title} is managed by the runtime.`, tone: "error" });
       return;
     }
-    const snapshot = board;
-    // Optimistic update via direct board mutation is not possible here since setBoard is in the hook.
-    // We still call the API and let the next poll refresh the board.
-    moveIssue(card.issueId, targetColumn.moveState ?? targetColumn.title)
+    optimisticMoveCard(cardId, targetColumn.id);
+    moveIssue(card.issueId, targetColumn.moveState)
       .then(() => refresh())
       .catch((err: unknown) => {
+        refresh();
         push({ title: `Failed to move ${card.identifier}`, description: err instanceof Error ? err.message : String(err), tone: "error" });
       });
   };
@@ -203,7 +205,13 @@ const NorthstarApp = () => {
             )}
             {normalizedLocation(location) === "/board" && (
               <PageTransition id="/board">
-                <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
+                <DndContext
+                  sensors={sensors}
+                  collisionDetection={closestCenter}
+                  onDragStart={() => setDragging(true)}
+                  onDragEnd={(e) => { setDragging(false); handleDragEnd(e); }}
+                  onDragCancel={() => setDragging(false)}
+                >
                   <BoardPage
                     board={filteredBoard}
                     selectedIds={selectedIds}
@@ -222,6 +230,11 @@ const NorthstarApp = () => {
             {normalizedLocation(location) === "/prs" && (
               <PageTransition id="/prs">
                 <PullRequestPage board={filteredBoard} state={state} onCardAction={runAction} />
+              </PageTransition>
+            )}
+            {normalizedLocation(location) === "/refinements" && (
+              <PageTransition id="/refinements">
+                <RefinementsPage state={state} onCardAction={runAction} />
               </PageTransition>
             )}
             {normalizedLocation(location) === "/activity" && (

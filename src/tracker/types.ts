@@ -14,4 +14,5 @@ export interface Tracker {
   createComment?(issueId: string, body: string): Promise<TrackerComment | void>;
   fetchComments?(issueId: string): Promise<TrackerComment[]>;
   updateIssueState?(issueId: string, stateName: string): Promise<void>;
+  updateIssueDescription?(issueId: string, description: string): Promise<void>;
 }

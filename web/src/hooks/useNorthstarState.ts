@@ -19,6 +19,8 @@ export interface NorthstarState {
   refresh: () => Promise<void>;
   handleRefresh: () => Promise<void>;
   runAction: (label: string, action: () => Promise<unknown>) => Promise<void>;
+  optimisticMoveCard: (cardId: string, targetColumnId: string) => void;
+  setDragging: (dragging: boolean) => void;
 }
 
 export function useNorthstarState(): NorthstarState {
@@ -32,6 +34,7 @@ export function useNorthstarState(): NorthstarState {
 
   const selectedCardRef = useRef<BoardCard | null>(null);
   selectedCardRef.current = selectedCard;
+  const draggingRef = useRef(false);
 
   const { push } = useToast();
 
@@ -59,7 +62,9 @@ export function useNorthstarState(): NorthstarState {
       setLoading(false);
       push({ title: "Unable to load Northstar", description: messageForError(err), tone: "error" });
     });
-    const interval = setInterval(() => refresh().catch(() => undefined), 3500);
+    const interval = setInterval(() => {
+      if (!draggingRef.current) refresh().catch(() => undefined);
+    }, 3500);
     return () => clearInterval(interval);
   }, []);
 
@@ -82,6 +87,14 @@ export function useNorthstarState(): NorthstarState {
 
   const filteredBoard = (query: string): BoardSnapshot | null => filterBoard(board, query);
 
+  const optimisticMoveCard = (cardId: string, targetColumnId: string): void => {
+    setBoard(prev => prev ? moveCardOptimistically(prev, cardId, targetColumnId) : prev);
+  };
+
+  const setDragging = (dragging: boolean): void => {
+    draggingRef.current = dragging;
+  };
+
   return {
     board,
     state,
@@ -96,6 +109,8 @@ export function useNorthstarState(): NorthstarState {
     refresh,
     handleRefresh,
     runAction,
+    optimisticMoveCard,
+    setDragging,
   };
 }
 

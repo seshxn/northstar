@@ -17,7 +17,7 @@ export const cn = (...inputs: ClassValue[]): string => twMerge(clsx(inputs));
 // ─── Button ──────────────────────────────────────────────────────────────────
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 rounded-[var(--radius)] border border-transparent text-sm font-semibold min-h-10 px-3.5 py-2 cursor-pointer transition-all duration-150 ease-in-out disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-0 focus-ring-visible",
+  "inline-flex items-center justify-center gap-2 rounded-[var(--radius)] border border-transparent text-sm font-semibold min-h-10 px-3.5 py-2 cursor-pointer transition-all duration-150 ease-in-out active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-0 focus-ring-visible",
   {
     variants: {
       variant: {
@@ -81,7 +81,7 @@ Input.displayName = "Input";
 // ─── Card ────────────────────────────────────────────────────────────────────
 
 export const Card = React.forwardRef<HTMLDivElement, HTMLAttributes<HTMLDivElement>>(({ className = "", ...props }, ref) => (
-  <div ref={ref} className={cn("rounded-[var(--radius)] border border-[var(--border)] bg-[var(--card)] text-[var(--card-foreground)]", className)} {...props} />
+  <div ref={ref} className={cn("rounded-[var(--radius)] border border-[var(--border)] bg-[var(--card)] text-[var(--card-foreground)] transition-all duration-300 hover:shadow-lg hover:-translate-y-0.5", className)} {...props} />
 ));
 Card.displayName = "Card";
 
@@ -154,6 +154,59 @@ SheetTitle.displayName = "SheetTitle";
 
 export const SheetClose = DialogPrimitive.Close;
 SheetClose.displayName = "SheetClose";
+
+// ─── Dialog (centered modal) ─────────────────────────────────────────────────
+
+export const Dialog = ({
+  open,
+  onOpenChange,
+  title,
+  children
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  title: string;
+  children: ReactNode;
+}) => (
+  <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
+    <AnimatePresence>
+      {open && (
+        <DialogPrimitive.Portal key="ns-dialog" forceMount>
+          <DialogPrimitive.Overlay asChild forceMount>
+            <motion.div
+              className="fixed inset-0 z-20 bg-black/60"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.15 }}
+            />
+          </DialogPrimitive.Overlay>
+          <DialogPrimitive.Content asChild forceMount>
+            <motion.div
+              className="fixed left-1/2 top-1/2 z-[21] w-[min(92vw,480px)] -translate-x-1/2 -translate-y-1/2 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--popover)] p-5 shadow-[var(--shadow)]"
+              style={{ color: "var(--popover-foreground)" }}
+              initial={{ scale: 0.96, opacity: 0, y: "-48%" }}
+              animate={{ scale: 1, opacity: 1, y: "-50%" }}
+              exit={{ scale: 0.96, opacity: 0, y: "-48%" }}
+              transition={{ duration: 0.15, ease: "easeOut" }}
+            >
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <DialogPrimitive.Title className="m-0 text-base font-semibold">{title}</DialogPrimitive.Title>
+                <DialogPrimitive.Close asChild>
+                  <Button variant="ghost" className="size-8 min-h-8 p-0" aria-label="Close dialog">
+                    <X size={16} />
+                  </Button>
+                </DialogPrimitive.Close>
+              </div>
+              {children}
+            </motion.div>
+          </DialogPrimitive.Content>
+        </DialogPrimitive.Portal>
+      )}
+    </AnimatePresence>
+  </DialogPrimitive.Root>
+);
+Dialog.displayName = "Dialog";
 
 // ─── Dropdown ────────────────────────────────────────────────────────────────
 

@@ -53,6 +53,14 @@ export class GitHubTracker implements Tracker {
     return this.fetchCommentPage(issueId);
   }
 
+  async updateIssueDescription(issueId: string, description: string): Promise<void> {
+    await this.request(`/repos/${this.config.repo}/issues/${encodeURIComponent(issueId)}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ body: description })
+    });
+  }
+
   async updateIssueState(issueId: string, stateName: string): Promise<void> {
     const isTerminal = this.config.terminal_states.some((s) => s.toLowerCase() === stateName.toLowerCase());
     await this.request(`/repos/${this.config.repo}/issues/${encodeURIComponent(issueId)}`, {
