@@ -1,6 +1,6 @@
 import type { NorthstarConfig } from "../workflow/schema.js";
 import type { Tracker } from "../tracker/types.js";
-import type { Runtime, RuntimeEvent, TurnResult } from "../runtime/types.js";
+import type { Runtime, RuntimeEvent, RuntimeRunMode, TurnResult } from "../runtime/types.js";
 import { createInitialState, type AuditEventKind, type OrchestratorState, type RunMode } from "./state.js";
 import { dispatchCandidates, type StartedRun } from "./tick.js";
 import { WorkspaceManager } from "../workspace/manager.js";
@@ -23,6 +23,7 @@ import {
   parseApprovalCommand,
   renderExecutionPrompt,
   renderPlanningPrompt,
+  renderRefinementPrompt,
   renderRevisionPrompt,
   saveAwaitingReview,
   type AwaitingReviewEntry
@@ -77,6 +78,9 @@ export class Orchestrator {
             : this.prepareRun(issue, { mode: "implementation" }),
         onStarted: (issue, started) => this.trackRun(issue, started, started.mode ?? "implementation")
       });
+      if (this.config.refinement.enabled && this.config.refinement.active_states.length > 0) {
+        await this.dispatchRefinementCandidates();
+      }
       return this.state;
     });
   }
@@ -181,7 +185,7 @@ export class Orchestrator {
 
   private async prepareRun(
     issue: Issue,
-    opts: { mode: RunMode; promptOverride?: string } = { mode: "implementation" }
+    opts: { mode: RuntimeRunMode; promptOverride?: string } = { mode: "implementation" }
   ): Promise<StartedRun> {
     const workspace = await this.workspaceManager.createForIssue(issue);
     await this.workspaceManager.runBeforeRun(workspace.path, issue);
@@ -241,6 +245,10 @@ export class Orchestrator {
       await this.executePlanningRun(issue, started, mode);
       return;
     }
+    if (mode === "refinement") {
+      await this.executeRefinementRun(issue, started);
+      return;
+    }
     if ((started.attempt ?? 1) === 1) {
       await this.comment(issue.id, `Northstar started ${issue.identifier}.`);
     }
@@ -253,22 +261,44 @@ export class Orchestrator {
       result = started.run ? await started.run() : { status: "failed", output: "runtime did not provide a run function" };
       turnResults.push(result);
       if (result.status === "completed") {
-        let previousOutput = result.output;
-        for (const gate of qualityGateSequenceForIssue(this.config.quality_gates, issue)) {
-          const gateResult = (await started.run?.(renderQualityGatePrompt(gate, issue, previousOutput))) ?? {
-            status: "failed" as const,
-            output: `quality gate ${gate} could not run`
-          };
-          turnResults.push(gateResult);
-          gateResults.push({ gate, status: gateResult.status, output: gateResult.output });
-          previousOutput = [previousOutput, gateResult.output].filter(Boolean).join("\n\n");
-          if (gateResult.status !== "completed") {
+        const gates = qualityGateSequenceForIssue(this.config.quality_gates, issue);
+        if (gates.length > 0) {
+          const runningEntry = this.state.running.get(issue.id);
+          if (runningEntry) runningEntry.mode = "qa";
+          this.audit("qa_started", {
+            issueId: issue.id,
+            issueIdentifier: issue.identifier,
+            message: `QA started for ${issue.identifier} (${gates.length} gate(s) running in parallel)`,
+            metadata: { gates }
+          });
+          const parallelResults = await Promise.all(
+            gates.map(async (gate) => {
+              const gateStarted = await this.prepareRun(issue, { mode: "implementation" });
+              try {
+                return (await gateStarted.run?.(renderQualityGatePrompt(gate, issue, result.output))) ?? {
+                  status: "failed" as const,
+                  output: `quality gate ${gate} could not run`
+                };
+              } catch (err) {
+                return { status: "failed" as const, output: err instanceof Error ? err.message : String(err) };
+              } finally {
+                if (gateStarted.workspacePath) await this.workspaceManager.runAfterRun(gateStarted.workspacePath, issue);
+              }
+            })
+          );
+          for (let i = 0; i < gates.length; i++) {
+            const gateResult = parallelResults[i];
+            turnResults.push(gateResult);
+            gateResults.push({ gate: gates[i], status: gateResult.status, output: gateResult.output });
+          }
+          const firstFailure = parallelResults.find((r) => r.status !== "completed");
+          if (firstFailure) {
+            const failedGate = gates[parallelResults.indexOf(firstFailure)];
             result = {
-              status: gateResult.status,
-              output: `Quality gate ${gate} finished with status ${gateResult.status}: ${gateResult.output ?? ""}`,
-              tokens: gateResult.tokens
+              status: firstFailure.status,
+              output: `Quality gate ${failedGate} finished with status ${firstFailure.status}: ${firstFailure.output ?? ""}`,
+              tokens: firstFailure.tokens
             };
-            break;
           }
         }
       }
@@ -325,6 +355,106 @@ export class Orchestrator {
     } else if (!willRetry) {
       await this.comment(issue.id, `Northstar finished ${issue.identifier} with status ${result.status}.`);
     }
+  }
+
+  private async dispatchRefinementCandidates(): Promise<void> {
+    const issues = await this.tracker.fetchIssuesByStates(this.config.refinement.active_states);
+    for (const issue of issues) {
+      if (!issue.id || !issue.identifier || !issue.title) continue;
+      if (this.state.running.has(issue.id) || this.state.claimed.has(issue.id)) continue;
+      if (this.state.completed.has(issue.identifier)) continue;
+      if (this.state.running.size >= this.state.maxConcurrentAgents) break;
+      this.state.claimed.add(issue.id);
+      const basePrompt = await this.basePromptForIssue(issue);
+      const started = await this.prepareRun(issue, {
+        mode: "refinement",
+        promptOverride: renderRefinementPrompt(basePrompt)
+      });
+      this.state.running.set(issue.id, {
+        issue,
+        threadId: started.threadId,
+        mode: "refinement",
+        startedAt: new Date(),
+        lastActivityAt: new Date(),
+        stop: started.stop,
+        attempt: started.attempt,
+        workspacePath: started.workspacePath,
+        prompt: started.prompt,
+        toolNames: started.tools?.map((tool) => tool.name) ?? [],
+        events: [],
+        skillSequence: started.skillSequence
+      });
+      this.state.claimed.add(issue.id);
+      this.audit("refinement_started", {
+        issueId: issue.id,
+        issueIdentifier: issue.identifier,
+        message: `Refinement started for ${issue.identifier}`
+      });
+      this.trackRun(issue, started, "refinement");
+    }
+  }
+
+  private async executeRefinementRun(issue: Issue, started: StartedRun): Promise<void> {
+    const startedAt = this.state.running.get(issue.id)?.startedAt ?? new Date();
+    let result: TurnResult;
+    try {
+      result = started.run ? await started.run() : { status: "failed", output: "runtime did not provide a run function" };
+      if (result.tokens) this.addTokens(result.tokens);
+    } catch (error) {
+      result = { status: "failed", output: error instanceof Error ? error.message : String(error) };
+    } finally {
+      if (started.workspacePath) await this.workspaceManager.runAfterRun(started.workspacePath, issue);
+    }
+
+    const running = this.state.running.get(issue.id);
+    if (!running || running.threadId !== started.threadId) return;
+    const completedAt = new Date();
+
+    if (result.status === "completed" && result.output) {
+      try {
+        await this.tracker.updateIssueDescription?.(issue.id, result.output);
+      } catch {
+        // non-fatal: description update failure should not fail the refinement
+      }
+      const completedState = this.config.refinement.completed_state;
+      if (completedState) await this.transition(issue.id, completedState);
+      this.state.completed.add(issue.identifier);
+      this.state.retryAttempts.delete(issue.id);
+      this.audit("refinement_completed", {
+        issueId: issue.id,
+        issueIdentifier: issue.identifier,
+        message: `Refinement completed for ${issue.identifier}`,
+        metadata: { tokens: result.tokens }
+      });
+      await this.comment(issue.id, `Northstar refined ${issue.identifier}.`);
+    } else {
+      this.scheduleRetry(issue, started, result);
+      this.audit("run_failed", {
+        issueId: issue.id,
+        issueIdentifier: issue.identifier,
+        message: `Refinement failed for ${issue.identifier}: ${(result.output ?? "").slice(0, 120)}`,
+        metadata: { status: result.status, tokens: result.tokens }
+      });
+    }
+
+    this.state.results.set(issue.id, {
+      issueId: issue.id,
+      issue: issue.identifier,
+      threadId: started.threadId,
+      workspacePath: started.workspacePath ?? "",
+      status: result.status,
+      output: result.output,
+      tokens: result.tokens,
+      events: running.events ?? [],
+      startedAt,
+      completedAt,
+      attempt: started.attempt ?? 1,
+      error: result.status === "failed" ? result.output : undefined,
+      gateResults: [],
+      mode: "refinement"
+    });
+    this.state.running.delete(issue.id);
+    this.state.claimed.delete(issue.id);
   }
 
   private async executePlanningRun(issue: Issue, started: StartedRun, mode: "planning" | "revision"): Promise<void> {

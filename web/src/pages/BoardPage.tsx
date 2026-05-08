@@ -2,11 +2,11 @@ import { SortableContext, useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useDroppable } from "@dnd-kit/core";
 import { AnimatePresence, motion } from "framer-motion";
-import { Activity, CheckCircle2, ChevronDown, CircleAlert, Clock3, Ellipsis, GripVertical, Inbox, Lock, XCircle } from "lucide-react";
+import { ChevronDown, Ellipsis, GripVertical, Inbox, Lock } from "lucide-react";
 import React, { useState } from "react";
 import type { BoardCard, BoardColumn, BoardSnapshot } from "../api";
 import { createPullRequest, retryIssue, stopIssue } from "../api";
-import { Badge, Button, Card, Checkbox, DropdownItem, DropdownMenu, cn } from "../ui";
+import { Badge, Button, Checkbox, DropdownItem, DropdownMenu, cn } from "../ui";
 import { EmptyState } from "../components/EmptyState";
 import { statusTone } from "../hooks/useNorthstarState";
 
@@ -24,7 +24,6 @@ export const BoardPage = ({
   onCardAction: (label: string, action: () => Promise<unknown>) => void;
 }) => (
   <>
-    <Metrics board={board} />
     <section className="grid grid-cols-[repeat(auto-fit,minmax(280px,1fr))] gap-4" id="board">
       {board.columns.map((column) => (
         <KanbanColumn column={column} key={column.id}>
@@ -98,23 +97,6 @@ const KanbanColumn = ({ column, children }: { column: BoardColumn; children: Rea
   );
 };
 
-const Metrics = ({ board }: { board: BoardSnapshot }) => (
-  <section className="mb-4 grid grid-cols-[repeat(auto-fit,minmax(140px,1fr))] gap-3" id="overview">
-    <Metric icon={<Activity />} label="Running" value={board.metrics.running} />
-    <Metric icon={<Clock3 />} label="Awaiting" value={board.metrics.awaitingReview} />
-    <Metric icon={<CircleAlert />} label="Retrying" value={board.metrics.retrying} />
-    <Metric icon={<CheckCircle2 />} label="Completed" value={board.metrics.completed} />
-    <Metric icon={<XCircle />} label="Failed" value={board.metrics.failed} />
-  </section>
-);
-
-const Metric = ({ icon, label, value }: { icon: React.ReactNode; label: string; value: number }) => (
-  <Card className="p-3.5">
-    <div className="mb-3 text-[var(--muted-foreground)]">{icon}</div>
-    <span className="block text-[11px] font-semibold uppercase text-[var(--muted-foreground)]">{label}</span>
-    <strong className="mt-1 block text-3xl leading-none">{value}</strong>
-  </Card>
-);
 
 const VISIBLE_LABEL_COUNT = 3;
 

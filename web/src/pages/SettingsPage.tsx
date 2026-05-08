@@ -16,6 +16,7 @@ export const SettingsPage = ({
   const [executionModel, setExecutionModel] = useState(settings?.runtime.executionModel ?? "");
   const [planningModel, setPlanningModel] = useState(settings?.runtime.planningModel ?? "");
   const [jql, setJql] = useState(settings?.tracker.jql ?? "");
+  const [backlogStates, setBacklogStates] = useState(settings?.tracker.backlog_states?.join(", ") ?? "");
   const [saving, setSaving] = useState(false);
   const { push } = useToast();
 
@@ -24,8 +25,9 @@ export const SettingsPage = ({
       setExecutionModel(settings.runtime.executionModel ?? "");
       setPlanningModel(settings.runtime.planningModel ?? "");
       setJql(settings.tracker.jql ?? "");
+      setBacklogStates(settings.tracker.backlog_states?.join(", ") ?? "");
     }
-  }, [settings?.runtime.executionModel, settings?.runtime.planningModel, settings?.tracker.jql]);
+  }, [settings?.runtime.executionModel, settings?.runtime.planningModel, settings?.tracker.jql, settings?.tracker.backlog_states]);
 
   const handleSave = async () => {
     setSaving(true);
@@ -33,7 +35,11 @@ export const SettingsPage = ({
       const payload: SettingsUpdatePayload = {};
       if (executionModel !== (settings?.runtime.executionModel ?? "")) payload.runtime = { ...payload.runtime, executionModel };
       if (planningModel !== (settings?.runtime.planningModel ?? "")) payload.runtime = { ...payload.runtime, planningModel };
-      if (jql !== (settings?.tracker.jql ?? "") && settings?.tracker.kind === "jira") payload.tracker = { jql };
+      if (jql !== (settings?.tracker.jql ?? "") && settings?.tracker.kind === "jira") payload.tracker = { ...payload.tracker, jql };
+      const parsedBacklogStates = backlogStates.split(",").map((s) => s.trim()).filter(Boolean);
+      if (parsedBacklogStates.join(",") !== (settings?.tracker.backlog_states ?? [])?.join(",")) {
+        payload.tracker = { ...payload.tracker, backlog_states: parsedBacklogStates };
+      }
       await updateSettings(payload);
       await onSaved();
       push({ title: "Settings saved (in-memory)" });
@@ -80,6 +86,15 @@ export const SettingsPage = ({
           <div className="grid gap-1.5">
             <label className="text-sm font-semibold">Active states</label>
             <Input value={settings?.tracker.active_states.join(", ") ?? ""} disabled />
+          </div>
+          <div className="grid gap-1.5">
+            <label className="text-sm font-semibold">Backlog states</label>
+            <Input
+              value={backlogStates}
+              onChange={(e) => setBacklogStates(e.target.value)}
+              placeholder="e.g. Backlog, Triage"
+            />
+            <p className="m-0 text-xs text-[var(--muted-foreground)]">Comma-separated tracker states shown as Backlog columns. Cards there are visible but agents won't pick them up.</p>
           </div>
 
           <p className="mb-0 mt-2 text-[11px] font-bold uppercase text-[var(--muted-foreground)]">Runtime Models</p>

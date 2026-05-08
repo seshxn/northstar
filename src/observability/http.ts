@@ -162,6 +162,9 @@ export const createHttpServer = (opts: {
       const t = tracker as Record<string, unknown>;
       patch.tracker = {};
       if (typeof t.jql === "string") patch.tracker.jql = t.jql;
+      if (Array.isArray(t.backlog_states) && t.backlog_states.every((s) => typeof s === "string")) {
+        patch.tracker.backlog_states = t.backlog_states as string[];
+      }
     }
     opts.updateSettings?.(patch);
     return reply.code(200).send({ ok: true });
@@ -203,6 +206,7 @@ export interface SettingsSnapshot {
     jql: string | null;
     project_key: string | null;
     active_states: string[];
+    backlog_states: string[];
   };
 }
 
@@ -213,6 +217,7 @@ export interface SettingsPatch {
   };
   tracker?: {
     jql?: string;
+    backlog_states?: string[];
   };
 }
 

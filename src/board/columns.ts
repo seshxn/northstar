@@ -6,10 +6,12 @@ export type BoardRuntimeState =
   | "awaiting_review"
   | "implementation"
   | "execution"
+  | "qa"
   | "retrying"
   | "completed"
   | "failed"
-  | "stalled";
+  | "stalled"
+  | "backlog";
 
 export interface BoardColumn {
   id: string;
@@ -74,6 +76,9 @@ const defaultBoardColumns = (config: NorthstarConfig): BoardColumn[] => {
     });
   };
 
+  for (const state of config.tracker.backlog_states) {
+    push({ title: state, trackerStates: [state], runtimeStates: ["backlog"], startsAgent: false, acceptsManualMoves: true });
+  }
   for (const state of config.tracker.active_states) {
     push({ title: state, trackerStates: [state], startsAgent: true });
   }
@@ -88,6 +93,7 @@ const defaultBoardColumns = (config: NorthstarConfig): BoardColumn[] => {
     push({ title: "Human Review", runtimeStates: ["awaiting_review"], acceptsManualMoves: false });
   }
   push({ title: "Implementing", runtimeStates: ["implementation", "execution"], acceptsManualMoves: false });
+  push({ title: "QA / Verifying", runtimeStates: ["qa"], acceptsManualMoves: false });
   push({ title: "Retrying", runtimeStates: ["retrying"], acceptsManualMoves: false });
   if (config.feedback.transitions.completed_state) {
     push({
