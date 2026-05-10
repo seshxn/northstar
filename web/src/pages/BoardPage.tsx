@@ -195,7 +195,7 @@ const IssueActions = ({ card, onAction }: { card: BoardCard; onAction: (label: s
     ) : null}
     <DropdownItem
       onSelect={() => {
-        onAction(`Creating PR for ${card.identifier}`, () => createPullRequest(card.issueId, card.branchName ? { head: card.branchName } : {}));
+        onAction(`Creating PR for ${card.identifier}`, () => createPullRequest(card.issueId, card.branchName ?? ""));
       }}
     >
       Create PR
