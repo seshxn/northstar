@@ -345,7 +345,7 @@ describe("SPEC 17.4 orchestrator dispatch, retry, and reconcile", () => {
     expect(tracker.updateIssueState).toHaveBeenCalledWith("issue-policy", "Review");
   });
 
-  test("runs configured sequential quality gates after implementation succeeds", async () => {
+  test("runs configured quality gates in parallel after implementation succeeds", async () => {
     const root = await mkdtemp(join(tmpdir(), "northstar-gates-"));
     const candidate = issue({ id: "issue-gates", identifier: "SYM-9", title: "Gate work", labels: ["security"] });
     const tracker: Tracker = {
@@ -379,15 +379,23 @@ describe("SPEC 17.4 orchestrator dispatch, retry, and reconcile", () => {
     await orchestrator.tick();
     await orchestrator.waitForIdle();
 
+    // 1 implementation turn + 3 parallel gate turns
     expect(runTurn).toHaveBeenCalledTimes(4);
-    expect(prompts[1]).toContain("Quality gate: test");
-    expect(prompts[2]).toContain("Quality gate: review");
-    expect(prompts[3]).toContain("Quality gate: security_review");
-    expect(orchestrator.state.results.get("issue-gates")?.gateResults).toEqual([
-      { gate: "test", status: "completed", output: "ok-2" },
-      { gate: "review", status: "completed", output: "ok-3" },
-      { gate: "security_review", status: "completed", output: "ok-4" }
-    ]);
+    expect(prompts[0]).not.toContain("Quality gate:");
+    expect(prompts.slice(1)).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("Quality gate: test"),
+        expect.stringContaining("Quality gate: review"),
+        expect.stringContaining("Quality gate: security_review")
+      ])
+    );
+    const gateResults = orchestrator.state.results.get("issue-gates")?.gateResults ?? [];
+    expect(gateResults.map((g) => g.gate)).toEqual(["test", "review", "security_review"]);
+    expect(gateResults.every((g) => g.status === "completed")).toBe(true);
+    // qa_started audit event must be recorded
+    const qaEvent = orchestrator.state.auditLog.find((e) => e.kind === "qa_started");
+    expect(qaEvent).toBeDefined();
+    expect(qaEvent?.issueId).toBe("issue-gates");
   });
 
   test("stale stalled-run completion does not remove a restarted run", async () => {

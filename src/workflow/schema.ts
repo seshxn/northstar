@@ -16,7 +16,8 @@ const linearTrackerSchema = z.object({
   project_slug: z.string().optional(),
   assignee: z.string().optional(),
   active_states: z.array(z.string()).default(["Todo", "In Progress"]),
-  terminal_states: z.array(z.string()).default(["Closed", "Cancelled", "Canceled", "Duplicate", "Done"])
+  terminal_states: z.array(z.string()).default(["Closed", "Cancelled", "Canceled", "Duplicate", "Done"]),
+  backlog_states: z.array(z.string()).default([])
 });
 
 const jiraTrackerSchema = z.object({
@@ -27,7 +28,8 @@ const jiraTrackerSchema = z.object({
   project_key: z.string(),
   jql: z.string().optional(),
   active_states: z.array(z.string()).default(["To Do", "In Progress"]),
-  terminal_states: z.array(z.string()).default(["Done", "Cancelled", "Won't Do"])
+  terminal_states: z.array(z.string()).default(["Done", "Cancelled", "Won't Do"]),
+  backlog_states: z.array(z.string()).default([])
 });
 
 const githubTrackerSchema = z.object({
@@ -36,7 +38,8 @@ const githubTrackerSchema = z.object({
   repo: z.string(),
   labels: stringArray.default([]),
   active_states: z.array(z.string()).default(["open"]),
-  terminal_states: z.array(z.string()).default(["closed"])
+  terminal_states: z.array(z.string()).default(["closed"]),
+  backlog_states: z.array(z.string()).default([])
 });
 
 const runtimeSchema = z.discriminatedUnion("kind", [
@@ -140,7 +143,7 @@ const feedbackSchema = z
 const qualityGatesSchema = z
   .object({
     enabled: z.boolean().default(false),
-    mode: z.enum(["sequential"]).default("sequential"),
+    mode: z.enum(["sequential", "parallel"]).default("sequential"),
     default_sequence: stringArray.default([]),
     label_sequences: z.record(stringArray).default({})
   })
@@ -163,10 +166,12 @@ const boardRuntimeStateSchema = z.enum([
   "awaiting_review",
   "implementation",
   "execution",
+  "qa",
   "retrying",
   "completed",
   "failed",
-  "stalled"
+  "stalled",
+  "backlog"
 ]);
 
 const boardColumnSchema = z.object({
@@ -228,6 +233,15 @@ const sequencingSchema = z
   })
   .default({});
 
+const refinementSchema = z
+  .object({
+    enabled: z.boolean().default(false),
+    active_states: z.array(z.string()).default([]),
+    completed_state: z.string().optional(),
+    prompt_template: z.string().optional()
+  })
+  .default({});
+
 const workflowSchema = z.object({
   tracker: z.union([linearTrackerSchema, jiraTrackerSchema, githubTrackerSchema]).default({ kind: "linear" }),
   runtime: runtimeSchema.default({ kind: "codex_app_server" }),
@@ -286,6 +300,7 @@ const workflowSchema = z.object({
   approval_gates: approvalGatesSchema,
   policy: policySchema,
   feedback: feedbackSchema,
+  refinement: refinementSchema,
   integrations: integrationSchema
 });
 

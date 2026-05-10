@@ -205,6 +205,7 @@ const cardFromAwaiting = (entry: { issueId: string; issue: string; title: string
 const runningModeToRuntimeStatus = (mode: string | undefined): BoardRuntimeState => {
   if (mode === "planning" || mode === "revision") return "planning";
   if (mode === "execution") return "execution";
+  if (mode === "qa") return "qa";
   return "implementation";
 };
 

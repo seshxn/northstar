@@ -1,7 +1,7 @@
 import type { Issue } from "../tracker/issue.js";
 import type { Tool } from "../tools/types.js";
 
-export type RuntimeRunMode = "implementation" | "planning" | "revision" | "execution";
+export type RuntimeRunMode = "implementation" | "planning" | "revision" | "execution" | "refinement";
 
 export interface Runtime {
   readonly kind: string;

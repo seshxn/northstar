@@ -31,7 +31,7 @@ export interface BoardCard {
   labels: string[];
   priority: number | null;
   url: string | null;
-  runtimeStatus: "idle" | "planning" | "awaiting_review" | "implementation" | "execution" | "retrying" | "completed" | "failed" | "stalled";
+  runtimeStatus: "idle" | "planning" | "awaiting_review" | "implementation" | "execution" | "qa" | "retrying" | "completed" | "failed" | "stalled";
   lastActivityAt: string | null;
   lastEvent: string | null;
   workspacePath: string | null;
@@ -53,13 +53,16 @@ export type AuditEventKind =
   | "run_started"
   | "plan_created"
   | "dependency_detected"
+  | "qa_started"
   | "run_completed"
   | "run_failed"
   | "approval_triggered"
   | "feedback_triggered"
   | "rejection_triggered"
   | "retry_scheduled"
-  | "issue_stopped";
+  | "issue_stopped"
+  | "refinement_started"
+  | "refinement_completed";
 
 export interface AuditEvent {
   id: number;
@@ -76,6 +79,7 @@ export interface StateSnapshot {
     issue: string;
     issueId: string;
     threadId: string;
+    mode: string | null;
     eventCount: number;
     lastEvent: string;
     workspacePath?: string;
@@ -111,6 +115,8 @@ export interface StateSnapshot {
     tokens?: { input: number; output: number; total: number };
     events?: RuntimeEvent[];
     toolNames?: string[];
+    gateResults?: Array<{ gate: string; status: string; output?: string }>;
+    mode?: string | null;
   }>;
   tokenTotals: { input: number; output: number; total: number };
   auditLog?: AuditEvent[];
@@ -137,6 +143,7 @@ export interface SettingsSnapshot {
     jql: string | null;
     project_key: string | null;
     active_states: string[];
+    backlog_states: string[];
   };
 }
 
@@ -147,6 +154,7 @@ export interface SettingsUpdatePayload {
   };
   tracker?: {
     jql?: string;
+    backlog_states?: string[];
   };
 }
 
@@ -212,11 +220,11 @@ export async function retryIssue(issueId: string): Promise<void> {
   await jsonFetch(`/api/v1/${encodeURIComponent(issueId)}/retry`, { method: "POST" });
 }
 
-export async function createPullRequest(issueId: string, payload: CreatePullRequestPayload = {}): Promise<void> {
+export async function createPullRequest(issueId: string, head: string, base?: string): Promise<void> {
   await jsonFetch(`/api/v1/issues/${encodeURIComponent(issueId)}/pr/create`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify(payload)
+    body: JSON.stringify({ head, ...(base ? { base } : {}) })
   });
 }
 

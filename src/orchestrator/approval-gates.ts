@@ -70,6 +70,12 @@ export const renderRevisionPrompt = (basePrompt: string, previousPlan: string, f
     `Human feedback:\n${feedback}`
   ].join("\n\n");
 
+export const renderRefinementPrompt = (basePrompt: string): string =>
+  [
+    basePrompt,
+    "Refinement task: analyze this ticket and produce a comprehensive, well-structured description that will help an engineer implement it. Cover: what the feature does and why it exists, clear acceptance criteria, edge cases to handle, and any technical context needed. Output ONLY the refined description text in markdown — no preamble, no explanations, no file edits, no commands."
+  ].join("\n\n");
+
 export const renderExecutionPrompt = (basePrompt: string, plan: string): string =>
   [
     basePrompt,

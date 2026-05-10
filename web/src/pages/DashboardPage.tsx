@@ -1,11 +1,12 @@
 import { TokenHeatmap } from "../components/TokenHeatmap";
-import { MiniAgentTerminal } from "../components/AgentTerminal";
+import { MetricsPanel } from "../components/MetricsPanel";
 import { DonutRing } from "../components/DonutRing";
 import { RunPanel } from "../components/RunPanel";
 import { AUDIT_KIND_LABELS, AUDIT_KIND_TONE } from "../lib/constants";
 import { formatRelativeTime, formatDuration } from "../hooks/useNorthstarState";
 import { type BoardCard, type BoardSnapshot, type AuditEvent, type StateSnapshot, type SettingsSnapshot } from "../api";
 import { Badge, Card, cn } from "../ui";
+import { motion } from "framer-motion";
 
 const AuditCard = ({ events, onViewAll }: { events: AuditEvent[]; onViewAll?: () => void }) => (
   <Card className="p-4 shadow-[var(--shadow)]">
@@ -100,11 +101,13 @@ export const DashboardPage = ({
 
   return (
     <>
-      <TokenHeatmap board={board} state={state} successRate={successRate} />
-      <section className="mb-4">
-        <MiniAgentTerminal state={state} />
-      </section>
-      <section className="grid grid-cols-[repeat(auto-fit,minmax(320px,1fr))] gap-4">
+      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
+        <TokenHeatmap board={board} state={state} successRate={successRate} />
+      </motion.div>
+      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, delay: 0.1 }}>
+        <MetricsPanel state={state} />
+      </motion.div>
+      <motion.section initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, delay: 0.2 }} className="grid grid-cols-[repeat(auto-fit,minmax(320px,1fr))] gap-4">
         <Card className="p-4 shadow-[var(--shadow)] glass-card">
           <h2 className="mb-3 mt-0 text-base font-semibold">Human Review</h2>
           {awaitingCards.length === 0 ? (
@@ -155,7 +158,7 @@ export const DashboardPage = ({
         <RunPanel state={state} compact />
         <RetryQueuePanel state={state} board={board} onSelectCard={onSelectCard} />
         <AuditCard events={(state?.auditLog ?? []).slice(-5).reverse()} onViewAll={() => onNavigate("/activity")} />
-      </section>
+      </motion.section>
     </>
   );
 };

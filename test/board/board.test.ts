@@ -100,6 +100,7 @@ describe("board columns", () => {
       "planning",
       "human-review",
       "implementing",
+      "qa-verifying",
       "retrying",
       "pr-open",
       "blocked"

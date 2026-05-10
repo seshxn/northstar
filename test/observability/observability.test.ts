@@ -104,7 +104,8 @@ describe("SPEC 17.6 observability", () => {
           kind: "linear",
           jql: null,
           project_key: null,
-          active_states: ["Todo", "In Progress"]
+          active_states: ["Todo", "In Progress"],
+          backlog_states: []
         }
       }),
       refresh: async () => {
@@ -171,7 +172,8 @@ describe("SPEC 17.6 observability", () => {
         kind: "linear",
         jql: null,
         project_key: null,
-        active_states: ["Todo", "In Progress"]
+        active_states: ["Todo", "In Progress"],
+        backlog_states: []
       }
     });
     expect((await app.inject({ method: "GET", url: "/api/v1/SYM-1" })).statusCode).toBe(200);

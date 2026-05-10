@@ -4,6 +4,9 @@ import type { GraphqlRequest } from "./client.js";
 import { LinearClient } from "./client.js";
 import { normalizeLinearIssue } from "./normalize.js";
 
+const updateDescriptionMutation =
+  "mutation NorthstarLinearUpdateDescription($id:String!,$description:String!){issueUpdate(id:$id,input:{description:$description}){success}}";
+
 const pollQuery =
   "query NorthstarLinearPoll($projectSlug:String!,$stateNames:[String!]!,$first:Int!,$after:String){issues(filter:{project:{slugId:{eq:$projectSlug}},state:{name:{in:$stateNames}}},first:$first,after:$after){nodes{id identifier title description priority state{name} branchName url labels{nodes{name}} inverseRelations(first:50){nodes{type issue{id identifier state{name}}}} createdAt updatedAt} pageInfo{hasNextPage endCursor}}}";
 const byIdsQuery =
@@ -63,6 +66,10 @@ export class LinearTracker implements Tracker {
 
   fetchComments(issueId: string): Promise<TrackerComment[]> {
     return this.fetchCommentPages(issueId, { issueId, first: 50, after: null });
+  }
+
+  async updateIssueDescription(issueId: string, description: string): Promise<void> {
+    await this.graphql(updateDescriptionMutation, { id: issueId, description });
   }
 
   private async fetchPages(query: string, variables: Record<string, unknown>, acc: Issue[] = []): Promise<Issue[]> {

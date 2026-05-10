@@ -51,6 +51,21 @@ export class JiraTracker implements Tracker {
     return comments.map(normalizeJiraComment).filter((comment): comment is TrackerComment => comment !== null);
   }
 
+  async updateIssueDescription(issueId: string, description: string): Promise<void> {
+    await this.request(`/rest/api/3/issue/${encodeURIComponent(issueId)}`, {
+      method: "PUT",
+      body: JSON.stringify({
+        fields: {
+          description: {
+            type: "doc",
+            version: 1,
+            content: [{ type: "paragraph", content: [{ type: "text", text: description }] }]
+          }
+        }
+      })
+    });
+  }
+
   async updateIssueState(issueId: string, stateName: string): Promise<void> {
     const transitions = await this.request(`/rest/api/3/issue/${encodeURIComponent(issueId)}/transitions`);
     const transition = (transitions as { transitions?: Array<{ id: string; name: string }> }).transitions?.find(

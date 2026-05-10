@@ -2,20 +2,23 @@ import type { Issue } from "../tracker/issue.js";
 import type { RuntimeEvent, TurnResult } from "../runtime/types.js";
 import type { AwaitingReviewEntry } from "./approval-gates.js";
 
-export type RunMode = "implementation" | "planning" | "revision" | "execution";
+export type RunMode = "implementation" | "planning" | "revision" | "execution" | "qa" | "refinement";
 
 export type AuditEventKind =
   | "issue_dispatched"
   | "run_started"
   | "plan_created"
   | "dependency_detected"
+  | "qa_started"
   | "run_completed"
   | "run_failed"
   | "approval_triggered"
   | "feedback_triggered"
   | "rejection_triggered"
   | "retry_scheduled"
-  | "issue_stopped";
+  | "issue_stopped"
+  | "refinement_started"
+  | "refinement_completed";
 
 export interface AuditEvent {
   id: number;
@@ -75,6 +78,7 @@ export interface RunResultEntry {
   branchName?: string | null;
   baseBranch?: string | null;
   changedFiles?: string[];
+  mode?: RunMode;
 }
 
 export interface GateResultEntry {

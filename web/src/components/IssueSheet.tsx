@@ -1,12 +1,12 @@
 import React from "react";
-import { Clock3, Cpu, Lock, PanelRightClose, Terminal, Wrench, Zap } from "lucide-react";
+import { CheckCircle2, ChevronDown, Clock3, Cpu, Lock, PanelRightClose, ShieldCheck, Terminal, Wrench, XCircle, Zap } from "lucide-react";
 import ReactMarkdown from "react-markdown";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { BoardCard, StateSnapshot } from "../api";
 import { addComment, approvePlan, rejectPlan, sendPlanFeedback, stopIssue } from "../api";
-import { Badge, Button, Sheet, SheetClose, SheetTitle } from "../ui";
+import { Badge, Button, Sheet, SheetClose, SheetTitle, cn } from "../ui";
 import { ChangeLogVisual } from "./ChangeLogVisual";
-import { FullAgentTerminal } from "./AgentTerminal";
+import { LiveEventFeed } from "./MetricsPanel";
 import { RichDiffViewer } from "./RichDiffViewer";
 import { formatRelativeTime, formatTokenCount, formatDuration, statusTone } from "../hooks/useNorthstarState";
 import { AUDIT_KIND_LABELS, AUDIT_KIND_TONE } from "../lib/constants";
@@ -89,10 +89,10 @@ export const IssueSheet = ({ awaitingPlan, card, state, onClose, onAction }: Pro
             </div>
           ) : null}
 
-          {(card.runtimeStatus === "planning" || card.runtimeStatus === "implementation" || card.runtimeStatus === "execution") ? (
+          {(card.runtimeStatus === "planning" || card.runtimeStatus === "implementation" || card.runtimeStatus === "execution" || card.runtimeStatus === "qa") ? (
             <div className="mb-5 border-t border-[var(--border)] pt-4">
-              <h3 className="mb-2 mt-0 text-sm font-semibold">Agent Brain — Live</h3>
-              <FullAgentTerminal issueId={card.issueId} issue={card.identifier} state={state} />
+              <h3 className="mb-2 mt-0 text-sm font-semibold">Live Activity</h3>
+              <LiveEventFeed issueId={card.issueId} state={state} />
             </div>
           ) : null}
 
@@ -110,6 +110,38 @@ export const IssueSheet = ({ awaitingPlan, card, state, onClose, onAction }: Pro
             <div className="mb-5 border-t border-[var(--border)] pt-4">
               <h3 className="mb-2 mt-0 text-sm font-semibold">Change Summary</h3>
               <ChangeLogVisual result={result} />
+            </div>
+          ) : null}
+
+          {result?.gateResults && result.gateResults.length > 0 ? (
+            <div className="mb-5 border-t border-[var(--border)] pt-4">
+              <div className="mb-3 flex items-center gap-2">
+                <ShieldCheck size={15} className="text-[var(--muted-foreground)]" />
+                <h3 className="m-0 text-sm font-semibold">Quality Gates</h3>
+              </div>
+              <div className="grid gap-2">
+                {result.gateResults.map((gr) => (
+                  <div
+                    key={gr.gate}
+                    className="rounded-[var(--radius)] border border-[var(--border)] bg-[var(--background)] p-3"
+                  >
+                    <div className="mb-1.5 flex items-center gap-2">
+                      {gr.status === "completed" ? (
+                        <CheckCircle2 size={14} className="shrink-0 text-[var(--success,#22c55e)]" />
+                      ) : (
+                        <XCircle size={14} className="shrink-0 text-[var(--destructive,#ef4444)]" />
+                      )}
+                      <span className="text-sm font-medium capitalize">{gr.gate.replace(/_/g, " ")}</span>
+                      <span className="ml-auto">
+                        <Badge tone={gr.status === "completed" ? "good" : "bad"}>{gr.status}</Badge>
+                      </span>
+                    </div>
+                    {gr.output ? (
+                      <p className="m-0 mt-1.5 text-xs leading-5 text-[var(--muted-foreground)] line-clamp-3">{gr.output}</p>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
             </div>
           ) : null}
 
@@ -152,8 +184,8 @@ export const IssueSheet = ({ awaitingPlan, card, state, onClose, onAction }: Pro
           </div>
 
           {card.runtimeStatus === "awaiting_review" ? (
-            <div className="mb-5 grid gap-2 border-t border-[var(--border)] pt-4">
-              <h3 className="mb-0 mt-0 text-sm font-semibold">Plan Review</h3>
+            <div className="mb-5 border-t border-[var(--border)] pt-4">
+              <h3 className="mb-2 mt-0 text-sm font-semibold">Plan Review</h3>
               {awaitingPlan?.planOutput ? (
                 awaitingPlan.planOutput.includes("@@") ? (
                   <RichDiffViewer diff={awaitingPlan.planOutput} />
@@ -165,35 +197,18 @@ export const IssueSheet = ({ awaitingPlan, card, state, onClose, onAction }: Pro
               ) : (
                 <p className="text-sm text-[var(--muted-foreground)]">No plan output available yet.</p>
               )}
-              <Button onClick={() => onAction(`Approved ${card.identifier}`, () => approvePlan(card))}>Approve Plan</Button>
-              <textarea
-                aria-label="Request specific changes"
-                value={feedback}
-                onChange={(e) => setFeedback(e.target.value)}
-                placeholder="Request specific changes"
-                className="min-h-24 w-full resize-y rounded-[var(--radius)] border border-[var(--input)] bg-[var(--background)] p-3 text-sm outline-none focus-ring"
+              <PlanReviewActions
+                card={card}
+                feedback={feedback}
+                setFeedback={setFeedback}
+                rejectReason={rejectReason}
+                setRejectReason={setRejectReason}
+                onAction={onAction}
               />
-              <Button
-                variant="secondary"
-                disabled={!feedback.trim()}
-                onClick={() => onAction(`Sent feedback for ${card.identifier}`, () => sendPlanFeedback(card, feedback))}
-              >
-                Request Changes
-              </Button>
-              <textarea
-                aria-label="Optional rejection reason"
-                value={rejectReason}
-                onChange={(e) => setRejectReason(e.target.value)}
-                placeholder="Optional rejection reason"
-                className="min-h-24 w-full resize-y rounded-[var(--radius)] border border-[var(--input)] bg-[var(--background)] p-3 text-sm outline-none focus-ring"
-              />
-              <Button variant="danger" onClick={() => onAction(`Rejected ${card.identifier}`, () => rejectPlan(card, rejectReason))}>
-                Reject
-              </Button>
             </div>
           ) : null}
 
-          {["planning", "implementation", "execution"].includes(card.runtimeStatus) ? (
+          {["planning", "implementation", "execution", "qa"].includes(card.runtimeStatus) ? (
             <div className="mb-5 border-t border-[var(--border)] pt-4">
               <Button variant="danger" onClick={() => onAction(`Stopped ${card.identifier}`, () => stopIssue(card))}>
                 Stop Run
@@ -296,3 +311,114 @@ const TelemetryStat = ({ icon, label, value }: { icon: React.ReactNode; label: s
     <div className="token-counter text-sm font-semibold">{value}</div>
   </div>
 );
+
+
+// ── Plan Review Actions ───────────────────────────────────────────────────────
+
+type ReviewMode = "approve" | "request_changes" | "reject";
+
+const REVIEW_MODES: { mode: ReviewMode; label: string; placeholder: string; required: boolean }[] = [
+  { mode: "approve",          label: "Approve Plan",     placeholder: "",                         required: false },
+  { mode: "request_changes",  label: "Request Changes",  placeholder: "Describe the changes needed…", required: true  },
+  { mode: "reject",           label: "Reject Plan",      placeholder: "Reason for rejection (optional)…", required: false },
+];
+
+const PlanReviewActions = ({
+  card,
+  feedback,
+  setFeedback,
+  rejectReason,
+  setRejectReason,
+  onAction
+}: {
+  card: BoardCard;
+  feedback: string;
+  setFeedback: (v: string) => void;
+  rejectReason: string;
+  setRejectReason: (v: string) => void;
+  onAction: (label: string, action: () => Promise<unknown>) => void;
+}) => {
+  const [mode, setMode] = useState<ReviewMode>("approve");
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  const current = REVIEW_MODES.find((m) => m.mode === mode)!;
+  const textValue = mode === "request_changes" ? feedback : rejectReason;
+  const setText = mode === "request_changes" ? setFeedback : setRejectReason;
+  const canSubmit = !current.required || textValue.trim().length > 0;
+
+  const handleSubmit = () => {
+    if (mode === "approve") {
+      onAction(`Approved ${card.identifier}`, () => approvePlan(card));
+    } else if (mode === "request_changes") {
+      onAction(`Sent feedback for ${card.identifier}`, () => sendPlanFeedback(card, feedback));
+    } else {
+      onAction(`Rejected ${card.identifier}`, () => rejectPlan(card, rejectReason));
+    }
+  };
+
+  // Close dropdown on outside click
+  React.useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setDropdownOpen(false);
+      }
+    };
+    if (dropdownOpen) document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [dropdownOpen]);
+
+  return (
+    <div className="mt-4 grid gap-2">
+      {mode !== "approve" ? (
+        <textarea
+          aria-label={current.placeholder}
+          value={textValue}
+          onChange={(e) => setText(e.target.value)}
+          placeholder={current.placeholder}
+          className="min-h-24 w-full resize-y rounded-[var(--radius)] border border-[var(--input)] bg-[var(--background)] p-3 text-sm outline-none focus-ring"
+        />
+      ) : null}
+
+      <div className="flex">
+        <Button
+          variant={mode === "reject" ? "danger" : mode === "approve" ? "default" : "secondary"}
+          className="flex-1 rounded-r-none border-r-0"
+          disabled={!canSubmit}
+          onClick={handleSubmit}
+        >
+          {current.label}
+        </Button>
+        <div className="relative" ref={dropdownRef}>
+          <button
+            aria-label="Switch review action"
+            className={cn(
+              "flex h-full min-h-10 items-center justify-center rounded-l-none rounded-r-[var(--radius)] border px-2.5 transition-colors",
+              mode === "reject"
+                ? "border-[var(--destructive)] bg-[var(--destructive)] text-[var(--destructive-foreground)] hover:opacity-90"
+                : mode === "approve"
+                ? "border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)] hover:opacity-90"
+                : "border-[var(--border)] bg-[var(--secondary)] text-[var(--secondary-foreground)] hover:bg-[var(--accent)]"
+            )}
+            onClick={() => setDropdownOpen((v) => !v)}
+          >
+            <ChevronDown size={14} className={cn("transition-transform", dropdownOpen && "rotate-180")} />
+          </button>
+          {dropdownOpen ? (
+            <div className="absolute right-0 top-full z-30 mt-1 min-w-[180px] rounded-[var(--radius)] border border-[var(--border)] bg-[var(--popover)] p-1 shadow-[var(--shadow)]">
+              {REVIEW_MODES.filter((m) => m.mode !== mode).map((m) => (
+                <button
+                  key={m.mode}
+                  className="flex w-full items-center rounded-[calc(var(--radius)-4px)] px-3 py-2 text-left text-sm text-[var(--popover-foreground)] transition-colors hover:bg-[var(--accent)]"
+                  onClick={() => { setMode(m.mode); setDropdownOpen(false); }}
+                >
+                  {m.label}
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+};
