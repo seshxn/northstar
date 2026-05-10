@@ -35,6 +35,9 @@ export interface BoardCard {
   lastActivityAt: string | null;
   lastEvent: string | null;
   workspacePath: string | null;
+  branchName: string | null;
+  baseBranch: string | null;
+  changedFiles: string[];
   pr: { url: string; number: number; state: "open" | "merged" | "closed" } | null;
   detectedDependencies: string[];
 }
@@ -80,6 +83,9 @@ export interface StateSnapshot {
     eventCount: number;
     lastEvent: string;
     workspacePath?: string;
+    branchName?: string | null;
+    baseBranch?: string | null;
+    changedFiles?: string[];
     toolNames?: string[];
     skillSequence?: string[];
     startedAt?: string;
@@ -103,6 +109,9 @@ export interface StateSnapshot {
     completedAt: string;
     startedAt?: string;
     workspacePath: string;
+    branchName?: string | null;
+    baseBranch?: string | null;
+    changedFiles?: string[];
     tokens?: { input: number; output: number; total: number };
     events?: RuntimeEvent[];
     toolNames?: string[];
@@ -111,6 +120,7 @@ export interface StateSnapshot {
   }>;
   tokenTotals: { input: number; output: number; total: number };
   auditLog?: AuditEvent[];
+  pullRequests?: Array<{ issueId: string; url: string; number: number; state: "open" | "merged" | "closed" }>;
 }
 
 export interface SettingsSnapshot {
@@ -118,6 +128,15 @@ export interface SettingsSnapshot {
     kind: string;
     executionModel: string | null;
     planningModel: string | null;
+    capabilities: {
+      localShell: boolean;
+      filesystemEdits: boolean;
+      northstarTools: boolean;
+      tokenTelemetry: boolean;
+      multiTurnSession: boolean;
+      stop: boolean;
+      planningModel: boolean;
+    };
   };
   tracker: {
     kind: string;
@@ -137,6 +156,16 @@ export interface SettingsUpdatePayload {
     jql?: string;
     backlog_states?: string[];
   };
+}
+
+export interface CreatePullRequestPayload {
+  head?: string;
+  title?: string;
+  body?: string;
+  base?: string;
+  draft?: boolean;
+  labels?: string[];
+  reviewers?: string[];
 }
 
 export async function fetchBoard(): Promise<BoardSnapshot> {
@@ -220,7 +249,10 @@ export async function scanDependencies(): Promise<void> {
 }
 
 async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, init);
+  const headers = new Headers(init?.headers);
+  const token = window.localStorage.getItem("northstar-auth-token")?.trim();
+  if (token && !headers.has("authorization")) headers.set("authorization", `Bearer ${token}`);
+  const response = await fetch(url, { ...init, headers });
   if (!response.ok) {
     const body = await response.text();
     throw new Error(body || `Request failed with HTTP ${response.status}`);

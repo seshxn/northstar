@@ -48,14 +48,34 @@ export const analyzeDependencies = async (issues: Issue[], opts: { model?: strin
     const text = data.content?.find((block) => block.type === "text")?.text ?? "";
     const parsed: unknown = JSON.parse(text);
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter(
+    return normalizeDependencyResults(
+      issues,
+      parsed.filter(
       (item): item is DependencyResult =>
         item !== null &&
         typeof item === "object" &&
         typeof (item as Record<string, unknown>).issueId === "string" &&
         Array.isArray((item as Record<string, unknown>).blockedBy)
+      )
     );
   } catch {
     return [];
   }
+};
+
+export const normalizeDependencyResults = (issues: Issue[], results: DependencyResult[]): DependencyResult[] => {
+  const idByIdOrIdentifier = new Map<string, Issue>();
+  for (const issue of issues) {
+    idByIdOrIdentifier.set(issue.id, issue);
+    idByIdOrIdentifier.set(issue.identifier, issue);
+  }
+  return results.flatMap((result) => {
+    const issue = idByIdOrIdentifier.get(result.issueId);
+    if (!issue) return [];
+    const blockedBy = result.blockedBy
+      .map((blocker) => idByIdOrIdentifier.get(String(blocker)))
+      .filter((blocker): blocker is Issue => blocker !== undefined && blocker.id !== issue.id)
+      .map((blocker) => blocker.identifier);
+    return blockedBy.length > 0 ? [{ issueId: issue.id, blockedBy: [...new Set(blockedBy)] }] : [];
+  });
 };

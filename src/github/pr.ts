@@ -1,4 +1,7 @@
 import type { GitHubRequest } from "../tracker/github/client.js";
+import type { Issue } from "../tracker/issue.js";
+import type { RunResultEntry } from "../orchestrator/state.js";
+import { renderPrompt } from "../workflow/prompt.js";
 
 export interface GitHubPullRequestMetadata {
   url: string;
@@ -86,6 +89,46 @@ export const pullRequestLabels = (baseLabels: string[], labelsByIssueLabel: Reco
   }
   return labels;
 };
+
+export interface RenderPullRequestInputOpts {
+  titleTemplate: string;
+  bodyTemplate: string;
+  issue: Issue;
+  result?: RunResultEntry | null;
+  approvedPlan?: string | null;
+  explicitHead?: string | null;
+  explicitTitle?: string | null;
+  explicitBody?: string | null;
+}
+
+export const renderPullRequestInput = async (
+  opts: RenderPullRequestInputOpts
+): Promise<{ head: string | null; title: string; body: string }> => {
+  const head = opts.explicitHead?.trim() || opts.issue.branch_name || opts.result?.branchName || null;
+  const context = {
+    issue: opts.issue,
+    northstar: {
+      summary: opts.result?.output ?? "",
+      approved_plan: opts.approvedPlan ?? "",
+      verification: verificationText(opts.result),
+      changed_files: opts.result?.changedFiles ?? [],
+      branch: head ?? "",
+      workspace_path: opts.result?.workspacePath ?? "",
+      gate_results: opts.result?.gateResults ?? []
+    }
+  };
+  return {
+    head,
+    title: opts.explicitTitle ?? (await renderPrompt(opts.titleTemplate, context)),
+    body: opts.explicitBody ?? (await renderPrompt(opts.bodyTemplate, context))
+  };
+};
+
+const verificationText = (result: RunResultEntry | null | undefined): string =>
+  (result?.gateResults ?? [])
+    .map((gate) => gate.output)
+    .filter((output): output is string => Boolean(output))
+    .join("\n\n");
 
 export const parseGitHubRepo = (repo: string): GitHubRepo => {
   const [owner, name] = repo.split("/");

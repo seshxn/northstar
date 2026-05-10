@@ -28,6 +28,10 @@ import {
   saveAwaitingReview,
   type AwaitingReviewEntry
 } from "./approval-gates.js";
+import { boardColumnsForConfig } from "../board/columns.js";
+import { resolveDispatchPolicy } from "./dispatch-policy.js";
+import { applyPersistedSnapshot } from "../storage/rehydrate.js";
+import { MemoryNorthstarStore, snapshotFromState, type NorthstarStore } from "../storage/store.js";
 
 export class Orchestrator {
   readonly state: OrchestratorState;
@@ -40,14 +44,30 @@ export class Orchestrator {
     private readonly config: NorthstarConfig,
     private readonly tracker: Tracker,
     private readonly runtime: Runtime,
-    private promptTemplate = ""
+    private promptTemplate = "",
+    private readonly store: NorthstarStore = new MemoryNorthstarStore()
   ) {
-    this.workspaceManager = new WorkspaceManager({ root: config.workspace.root ?? "", hooks: config.hooks });
+    this.workspaceManager = new WorkspaceManager({
+      root: config.workspace.root ?? "",
+      hooks: config.hooks,
+      strategy: config.workspace.strategy,
+      repo: config.workspace.repo,
+      baseBranch: config.workspace.base_branch,
+      branchTemplate: config.workspace.branch_template,
+      reuseExisting: config.workspace.reuse_existing
+    });
+    const dispatchPolicy = resolveDispatchPolicy(config, boardColumnsForConfig(config));
     this.state = createInitialState({
       pollIntervalMs: config.polling.interval_ms,
       maxConcurrentAgents: config.agent.max_concurrent_agents,
       activeStates: config.tracker.active_states,
       terminalStates: config.tracker.terminal_states,
+      dispatchStates: dispatchPolicy.states,
+      requireUnblocked: dispatchPolicy.requireUnblocked,
+      requireReadyLabel: dispatchPolicy.requireReadyLabel,
+      readyLabels: dispatchPolicy.readyLabels,
+      blockedLabels: dispatchPolicy.blockedLabels,
+      blockDetectedDependencies: config.sequencing.enabled && config.sequencing.mode === "block_dispatch",
       maxConcurrentAgentsByState: config.agent.max_concurrent_agents_by_state
     });
   }
@@ -66,6 +86,7 @@ export class Orchestrator {
     return this.enqueue(async () => {
       await this.ensureAwaitingReviewLoaded();
       const issues = await this.tracker.fetchCandidateIssues();
+      if (this.config.sequencing.enabled && this.config.sequencing.scan_on_refresh) await this.runDependencyScan(issues);
       await this.processAwaitingReview(issues);
       await reconcileRunningIssues(this.state, issues);
       await restartStalledIssues(this.state, new Date(), this.stallTimeoutMs());
@@ -88,23 +109,7 @@ export class Orchestrator {
   scanDependencies(): Promise<void> {
     return this.enqueue(async () => {
       const issues = await this.tracker.fetchCandidateIssues();
-      const results = await analyzeDependencies(issues, {
-        model: planningModelForConfig(this.config),
-        apiKey: apiKeyForConfig(this.config)
-      });
-      this.state.detectedDependencies.clear();
-      for (const result of results) {
-        if (result.blockedBy.length > 0) {
-          this.state.detectedDependencies.set(result.issueId, result.blockedBy);
-          const issue = issues.find((i) => i.id === result.issueId);
-          this.audit("dependency_detected", {
-            issueId: result.issueId,
-            issueIdentifier: issue?.identifier,
-            message: `LLM detected ${result.blockedBy.length} blocker(s) for ${issue?.identifier ?? result.issueId}: ${result.blockedBy.join(", ")}`,
-            metadata: { blockedBy: result.blockedBy }
-          });
-        }
-      }
+      await this.runDependencyScan(issues);
     });
   }
 
@@ -129,6 +134,7 @@ export class Orchestrator {
     });
     this.state.running.delete(match.issue.id);
     this.state.claimed.delete(match.issue.id);
+    await this.persistState();
     return true;
   }
 
@@ -180,7 +186,13 @@ export class Orchestrator {
     this.state.retryAttempts.delete(issueId);
     this.state.claimed.delete(issueId);
     this.state.completed.delete(identifier);
+    await this.persistState();
     return true;
+  }
+
+  async recordPullRequest(issueId: string, pr: { url: string; number: number; state: "open" | "closed" | "merged" }): Promise<void> {
+    this.state.pullRequests.set(issueId, { issueId, ...pr });
+    await this.persistState();
   }
 
   private async prepareRun(
@@ -221,6 +233,11 @@ export class Orchestrator {
       tools,
       attempt,
       skillSequence,
+      branchName: workspace.branchName ?? issue.branch_name,
+      baseBranch: workspace.baseBranch,
+      changedFiles: workspace.changedFiles ?? [],
+      workspaceStrategy: workspace.strategy,
+      repoPath: workspace.repoPath,
       stop,
       run: (turnPrompt = prompt) =>
         session.runTurn({
@@ -232,6 +249,27 @@ export class Orchestrator {
           signal: abortController.signal
         })
     };
+  }
+
+  private async runDependencyScan(issues: Issue[]): Promise<void> {
+    const results = await analyzeDependencies(issues, {
+      model: planningModelForConfig(this.config),
+      apiKey: apiKeyForConfig(this.config)
+    });
+    this.state.detectedDependencies.clear();
+    for (const result of results) {
+      if (result.blockedBy.length > 0) {
+        this.state.detectedDependencies.set(result.issueId, result.blockedBy);
+        const issue = issues.find((i) => i.id === result.issueId);
+        this.audit("dependency_detected", {
+          issueId: result.issueId,
+          issueIdentifier: issue?.identifier,
+          message: `LLM detected ${result.blockedBy.length} blocker(s) for ${issue?.identifier ?? result.issueId}: ${result.blockedBy.join(", ")}`,
+          metadata: { blockedBy: result.blockedBy }
+        });
+      }
+    }
+    await this.persistState();
   }
 
   private trackRun(issue: Issue, started: StartedRun, mode: RunMode): void {
@@ -306,7 +344,10 @@ export class Orchestrator {
       result = { status: "failed", output: error instanceof Error ? error.message : String(error) };
       turnResults.push(result);
     } finally {
-      if (started.workspacePath) await this.workspaceManager.runAfterRun(started.workspacePath, issue);
+      if (started.workspacePath) {
+        await this.workspaceManager.runAfterRun(started.workspacePath, issue);
+        await this.refreshStartedWorkspaceMetadata(started);
+      }
     }
 
     const running = this.state.running.get(issue.id);
@@ -339,7 +380,10 @@ export class Orchestrator {
       completedAt,
       attempt: started.attempt ?? 1,
       error: result.status === "failed" ? result.output : undefined,
-      gateResults
+      gateResults,
+      branchName: started.branchName ?? issue.branch_name,
+      baseBranch: started.baseBranch,
+      changedFiles: started.changedFiles
     });
     this.state.running.delete(issue.id);
     this.state.claimed.delete(issue.id);
@@ -348,6 +392,7 @@ export class Orchestrator {
       issue.id,
       result.status === "completed" ? this.config.feedback.transitions.completed_state : this.config.feedback.transitions.failed_state
     );
+    await this.persistState();
     // Only comment on definitive outcomes: success, or a failure with no further retry queued.
     const willRetry = this.state.retryAttempts.has(issue.id);
     if (result.status === "completed") {
@@ -466,7 +511,10 @@ export class Orchestrator {
     } catch (error) {
       result = { status: "failed", output: error instanceof Error ? error.message : String(error) };
     } finally {
-      if (started.workspacePath) await this.workspaceManager.runAfterRun(started.workspacePath, issue);
+      if (started.workspacePath) {
+        await this.workspaceManager.runAfterRun(started.workspacePath, issue);
+        await this.refreshStartedWorkspaceMetadata(started);
+      }
     }
 
     const running = this.state.running.get(issue.id);
@@ -489,8 +537,12 @@ export class Orchestrator {
         completedAt: new Date(),
         attempt: started.attempt ?? 1,
         error: result.status === "failed" ? result.output : undefined,
-        gateResults: []
+        gateResults: [],
+        branchName: started.branchName ?? issue.branch_name,
+        baseBranch: started.baseBranch,
+        changedFiles: started.changedFiles
       });
+      await this.persistState();
       return;
     }
 
@@ -600,7 +652,10 @@ export class Orchestrator {
       prompt: started.prompt,
       toolNames: started.tools?.map((tool) => tool.name) ?? [],
       events: [],
-      skillSequence: started.skillSequence
+      skillSequence: started.skillSequence,
+      branchName: started.branchName ?? issue.branch_name,
+      baseBranch: started.baseBranch,
+      changedFiles: started.changedFiles
     });
     this.state.claimed.add(issue.id);
     this.audit("run_started", {
@@ -652,14 +707,40 @@ export class Orchestrator {
     return [...this.state.awaitingReview.values()].find((entry) => entry.issueId === identifier || entry.issue === identifier) ?? null;
   }
 
+  private async refreshStartedWorkspaceMetadata(started: StartedRun): Promise<void> {
+    if (!started.workspacePath || !started.workspaceStrategy) return;
+    const inspected = await this.workspaceManager.inspect({
+      path: started.workspacePath,
+      workspaceKey: started.workspacePath.split(/[\\/]/).at(-1) ?? "workspace",
+      createdNow: false,
+      strategy: started.workspaceStrategy,
+      repoPath: started.repoPath,
+      branchName: started.branchName,
+      baseBranch: started.baseBranch,
+      changedFiles: started.changedFiles
+    });
+    started.branchName = inspected.branchName ?? started.branchName;
+    started.changedFiles = inspected.changedFiles ?? started.changedFiles;
+  }
+
   private async ensureAwaitingReviewLoaded(): Promise<void> {
     if (this.awaitingReviewLoaded) return;
-    this.state.awaitingReview = await loadAwaitingReview(this.config.workspace.root ?? "");
+    const snapshot = await this.store.loadSnapshot();
+    if (snapshot) {
+      applyPersistedSnapshot(this.state, snapshot);
+    } else {
+      this.state.awaitingReview = await loadAwaitingReview(this.config.workspace.root ?? "");
+    }
     this.awaitingReviewLoaded = true;
   }
 
-  private persistAwaitingReview(): Promise<void> {
-    return saveAwaitingReview(this.config.workspace.root ?? "", this.state.awaitingReview);
+  private async persistAwaitingReview(): Promise<void> {
+    await saveAwaitingReview(this.config.workspace.root ?? "", this.state.awaitingReview);
+    await this.persistState();
+  }
+
+  private async persistState(): Promise<void> {
+    await this.store.saveSnapshot(snapshotFromState(this.state));
   }
 
   private recordEvent(issueId: string, event: RuntimeEvent): void {
@@ -691,6 +772,7 @@ export class Orchestrator {
     if (this.state.auditLog.length > MAX_AUDIT_EVENTS) {
       this.state.auditLog.splice(0, this.state.auditLog.length - MAX_AUDIT_EVENTS);
     }
+    void this.persistState().catch(() => undefined);
   }
 
   private async comment(issueId: string, body: string): Promise<void> {

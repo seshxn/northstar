@@ -189,6 +189,17 @@ const boardSchema = z
   })
   .default({});
 
+const dispatchSchema = z
+  .object({
+    mode: z.enum(["tracker_states", "board_start_columns"]).default("tracker_states"),
+    states: stringArray.default([]),
+    require_unblocked: z.boolean().default(true),
+    require_ready_label: z.boolean().default(false),
+    ready_labels: lowerStringArray,
+    blocked_labels: lowerStringArray
+  })
+  .default({});
+
 const pullRequestSchema = z
   .object({
     enabled: z.boolean().default(false),
@@ -205,6 +216,23 @@ const pullRequestSchema = z
   })
   .default({});
 
+const storageSchema = z
+  .object({
+    kind: z.enum(["memory", "json"]).default("memory"),
+    path: z.string().optional(),
+    retention_days: z.number().int().positive().default(30)
+  })
+  .default({});
+
+const sequencingSchema = z
+  .object({
+    enabled: z.boolean().default(false),
+    mode: z.enum(["advisory", "block_dispatch"]).default("advisory"),
+    scan_on_refresh: z.boolean().default(false),
+    write_tracker_relationships: z.boolean().default(false)
+  })
+  .default({});
+
 const refinementSchema = z
   .object({
     enabled: z.boolean().default(false),
@@ -218,7 +246,17 @@ const workflowSchema = z.object({
   tracker: z.union([linearTrackerSchema, jiraTrackerSchema, githubTrackerSchema]).default({ kind: "linear" }),
   runtime: runtimeSchema.default({ kind: "codex_app_server" }),
   polling: z.object({ interval_ms: z.number().int().positive().default(30_000) }).default({}),
-  workspace: z.object({ root: z.string().optional() }).default({}),
+  workspace: z
+    .object({
+      root: z.string().optional(),
+      strategy: z.enum(["directory", "git_worktree", "clone"]).default("directory"),
+      repo: z.string().optional(),
+      base_branch: z.string().default("main"),
+      branch_template: z.string().default("northstar/{{ issue.identifier | downcase }}"),
+      reuse_existing: z.boolean().default(true),
+      cleanup: z.object({ remove_after_pr_merge: z.boolean().default(false) }).default({})
+    })
+    .default({}),
   worker: z.object({ ssh_hosts: stringArray, max_concurrent_agents_per_host: z.number().int().positive().optional() }).default({}),
   agent: z
     .object({
@@ -242,11 +280,21 @@ const workflowSchema = z.object({
       dashboard_enabled: z.boolean().default(true),
       refresh_ms: z.number().int().positive().default(1000),
       render_interval_ms: z.number().int().positive().default(16)
+  })
+    .default({}),
+  server: z
+    .object({
+      port: z.number().int().nonnegative().optional(),
+      host: z.string().default("127.0.0.1"),
+      auth_token: z.string().optional(),
+      allow_unauthenticated_remote: z.boolean().default(false)
     })
     .default({}),
-  server: z.object({ port: z.number().int().nonnegative().optional(), host: z.string().default("127.0.0.1") }).default({}),
   board: boardSchema,
+  dispatch: dispatchSchema,
   pull_request: pullRequestSchema,
+  storage: storageSchema,
+  sequencing: sequencingSchema,
   skills: skillsSchema,
   quality_gates: qualityGatesSchema,
   approval_gates: approvalGatesSchema,
@@ -266,7 +314,19 @@ export const parseWorkflowConfig = (input: Record<string, unknown>, opts: Resolv
   return {
     ...parsed,
     workspace: {
+      ...parsed.workspace,
       root: resolvePathValue(parsed.workspace.root, join(tmpdir(), "northstar_workspaces"), {
+        env: opts.env,
+        homeDir: opts.homeDir ?? homedir()
+      }),
+      repo: parsed.workspace.repo ? resolvePathValue(parsed.workspace.repo, parsed.workspace.repo, {
+        env: opts.env,
+        homeDir: opts.homeDir ?? homedir()
+      }) : undefined
+    },
+    storage: {
+      ...parsed.storage,
+      path: resolvePathValue(parsed.storage.path, join(opts.homeDir ?? homedir(), ".northstar", "state.json"), {
         env: opts.env,
         homeDir: opts.homeDir ?? homedir()
       })

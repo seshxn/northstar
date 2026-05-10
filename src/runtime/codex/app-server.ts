@@ -5,6 +5,15 @@ import { normalizeCodexEvent } from "./events.js";
 
 export class CodexAppServerRuntime implements Runtime {
   readonly kind = "codex_app_server";
+  readonly capabilities = {
+    localShell: true,
+    filesystemEdits: true,
+    northstarTools: false,
+    tokenTelemetry: false,
+    multiTurnSession: false,
+    stop: true,
+    planningModel: false
+  };
   constructor(private readonly config: { command: string; turn_timeout_ms?: number }) {}
 
   async startSession(_opts: StartSessionOpts): Promise<Session> {

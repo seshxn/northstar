@@ -13,7 +13,7 @@ It watches Linear, Jira, or GitHub Issues, starts agent runs in isolated workspa
 Coding agents are most useful when the work queue, runtime behavior, and handoff path are explicit. Northstar turns an issue tracker into an agent operations system:
 
 - **Dispatch from real issues** - normalize Linear, Jira, or GitHub Issues into a consistent work model.
-- **Run in contained workspaces** - create per-issue directories, lifecycle hooks, and scoped tool access.
+- **Run in contained workspaces** - create per-issue directories, git worktrees, or clones with lifecycle hooks and scoped tool access.
 - **Keep humans in the loop** - require plan approval, request revisions, reject runs, and post feedback back to the tracker.
 - **See what happened** - inspect audit events, token usage, tool names, runtime status, and result snapshots.
 - **Ship the output** - create or reuse GitHub pull requests with configured labels, reviewers, draft mode, and branch metadata.
@@ -42,15 +42,18 @@ Core capabilities:
 - Workflow loading with YAML front matter, Liquid prompt rendering, and hot reload.
 - Tracker adapters for Linear, Jira, and GitHub Issues.
 - Runtime adapters for Codex, Claude Code, Bedrock Anthropic, and Gemini.
-- Dispatch ordering, concurrency limits, blocker checks, retries, reconciliation, and stalled-run restart.
+- Explicit dispatch policy, dispatch ordering, concurrency limits, blocker checks, retries, reconciliation, and stalled-run restart.
 - Prompt-level skill profiles selected globally or by issue label.
 - Sequential quality gates for test, review, security, docs, or custom prompts.
 - Tool policies with global and label-specific allow/deny rules.
 - Approval gates with `/approve`, `/revise <feedback>`, and `/reject` tracker commands.
+- Repository workspace strategies for plain directories, local git worktrees, or per-issue clones, including branch and changed-file metadata.
+- Optional JSON-backed local state persistence for run results, audit events, retries, review entries, dependency annotations, token totals, and PR metadata.
 - Local React dashboard with Dashboard, Board, Runs, PRs, Activity, and Settings views.
 - Drag-and-drop board moves for tracker-backed columns that allow manual movement.
 - Audit trail, token telemetry, event streams, and runtime status surfaced through HTTP APIs.
-- Optional LLM dependency scan across open issues.
+- Optional LLM dependency scan across open issues, with advisory mode or dispatch blocking.
+- Optional bearer-token protection for dashboard/API mutations when the server is exposed beyond localhost.
 - In-memory settings updates for runtime models and Jira JQL while the service is running.
 
 ## Quick Start
@@ -139,11 +142,81 @@ npm run dev:web
 
 ## Workflow Files
 
-`WORKFLOW.md` has YAML front matter followed by a Markdown prompt template. The YAML config selects trackers, runtimes, workspace behavior, server settings, board columns, integrations, skill profiles, policy, feedback, approval gates, and quality gates.
+`WORKFLOW.md` has YAML front matter followed by a Markdown prompt template. The YAML config selects trackers, runtimes, workspace behavior, server settings, dispatch policy, local storage, board columns, integrations, skill profiles, policy, feedback, approval gates, and quality gates.
 
 The Markdown body is rendered with Liquid and receives an `issue` object. Northstar appends deterministic issue context plus configured skill and gate instructions before sending the prompt to the selected runtime.
 
 Start with [WORKFLOW.example.md](WORKFLOW.example.md).
+
+### Dispatch Policy
+
+By default, Northstar preserves legacy behavior and dispatches issues in `tracker.active_states`. For clearer operator control, configure `dispatch.states`:
+
+```yaml
+dispatch:
+  mode: tracker_states
+  states: ["In Progress"]
+  require_unblocked: true
+  require_ready_label: false
+  blocked_labels: ["blocked", "needs-human"]
+```
+
+`mode: board_start_columns` dispatches from board columns marked `starts_agent: true`. Startup validation warns when `starts_agent` columns do not match the resolved dispatch states.
+
+### Local Storage
+
+Northstar can persist operator state locally:
+
+```yaml
+storage:
+  kind: json
+  path: ~/.northstar/state.json
+  retention_days: 30
+```
+
+JSON storage rehydrates audit events, completed results, retry attempts, awaiting-review entries, dependency annotations, token totals, and PR metadata after restart. Omit this block or set `kind: memory` for process-local state only.
+
+### Workspace Strategies
+
+The default workspace strategy is `directory`, which preserves the original safe per-issue directory behavior. Repository-backed workflows can opt into git-managed work units:
+
+```yaml
+workspace:
+  root: ~/northstar_workspaces
+  strategy: git_worktree # directory | git_worktree | clone
+  repo: ~/src/product-repo
+  base_branch: main
+  branch_template: "northstar/{{ issue.identifier | downcase }}-{{ issue.title | slug }}"
+  reuse_existing: true
+```
+
+Northstar records the workspace path, strategy, branch, base branch, and changed files in run results and board cards so PR handoff can be driven from actual run metadata.
+
+### Dependency Sequencing
+
+Dependency scans can remain advisory or block dispatch when a visible issue is predicted to depend on another visible issue:
+
+```yaml
+sequencing:
+  enabled: true
+  mode: block_dispatch # advisory | block_dispatch
+  scan_on_refresh: true
+```
+
+Detected dependencies are normalized to the current issue set and surfaced on the board. Treat this as operator assistance, not an authoritative dependency graph.
+
+### Dashboard Auth
+
+Localhost remains the default. If you bind the dashboard/API to a non-local host, configure a token or explicitly accept unauthenticated remote access:
+
+```yaml
+server:
+  host: 0.0.0.0
+  port: 4000
+  auth_token: $NORTHSTAR_DASHBOARD_TOKEN
+```
+
+When `auth_token` is set, mutating API calls require `Authorization: Bearer <token>`. The dashboard reads a token from `localStorage.northstar-auth-token`.
 
 ## Runtime Support
 
@@ -157,6 +230,8 @@ Runtime selection is configured with `runtime.kind`.
 | `gemini` | Experimental SDK harness using `generateContent` and Northstar tool specs. |
 
 Codex and Claude Code are the most mature paths. Treat Bedrock and Gemini as experimental until you have verified them with your model, tools, and workspace policy.
+
+The Settings view exposes a runtime capability matrix for local shell access, filesystem edits, Northstar tool calling, token telemetry, multi-turn session support, stop support, and planning-model support. Startup validation warns when process runtimes are configured with Northstar integration tools they cannot execute through the shared function-calling harness.
 
 ## Tracker Support
 
@@ -195,7 +270,7 @@ Common endpoints:
 | `POST /api/v1/refresh` | Trigger a best-effort tracker refresh. |
 | `POST /api/v1/issues/:identifier/stop` | Stop a running issue. |
 | `POST /api/v1/issues/:identifier/retry` | Retry a failed or retryable issue. |
-| `POST /api/v1/issues/:identifier/pr/create` | Create or reuse a configured GitHub pull request. |
+| `POST /api/v1/issues/:identifier/pr/create` | Create or reuse a configured GitHub pull request from branch/run metadata. |
 | `POST /api/v1/dependencies/scan` | Run optional LLM dependency detection across issues. |
 | `POST /api/v1/settings` | Change supported runtime and tracker settings in memory. |
 
@@ -204,7 +279,7 @@ Dashboard views:
 - **Dashboard** - metrics, human review, model split, active runs, retry queue, audit trail.
 - **Board** - configurable Kanban columns, drag-and-drop moves, bulk ticket actions.
 - **Runs** - active runs and recent result event streams.
-- **PRs** - PR-ready tickets and handoff actions.
+- **PRs** - PR-ready tickets, recent results, and a prefilled PR form for branch, title, body, labels, reviewers, base, and draft mode.
 - **Activity** - filterable audit log.
 - **Settings** - in-memory runtime model and tracker filter adjustments.
 

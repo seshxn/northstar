@@ -13,6 +13,11 @@ export interface StartedRun {
   tools?: Tool[];
   attempt?: number;
   skillSequence?: string[];
+  branchName?: string | null;
+  baseBranch?: string | null;
+  changedFiles?: string[];
+  workspaceStrategy?: "directory" | "git_worktree" | "clone";
+  repoPath?: string;
   run?: (prompt?: string) => Promise<TurnResult>;
 }
 
@@ -37,7 +42,10 @@ export const dispatchCandidates = async (opts: {
       prompt: started.prompt,
       toolNames: started.tools?.map((tool) => tool.name) ?? [],
       events: [],
-      skillSequence: started.skillSequence
+      skillSequence: started.skillSequence,
+      branchName: started.branchName ?? issue.branch_name,
+      baseBranch: started.baseBranch,
+      changedFiles: started.changedFiles
     });
     opts.state.claimed.add(issue.id);
     opts.onStarted?.(issue, started);
@@ -56,9 +64,12 @@ export const shouldDispatchIssue = (issue: Issue, state: OrchestratorState): boo
   const issueState = normalizeState(issue.state);
   return (
     Boolean(issue.id && issue.identifier && issue.title) &&
-    state.activeStates.has(issueState) &&
+    state.dispatchStates.has(issueState) &&
     !state.terminalStates.has(issueState) &&
-    !todoIssueBlockedByNonTerminal(issue, state) &&
+    !issueBlockedByNonTerminal(issue, state) &&
+    !issueBlockedByDetectedDependency(issue, state) &&
+    issueHasRequiredReadyLabel(issue, state) &&
+    !issueHasBlockedLabel(issue, state) &&
     retryWindowElapsed(issue, state) &&
     !state.completed.has(issue.identifier) &&
     !state.claimed.has(issue.id) &&
@@ -84,10 +95,25 @@ const stateSlotsAvailable = (issue: Issue, state: OrchestratorState): boolean =>
   return used < limit;
 };
 
-const todoIssueBlockedByNonTerminal = (issue: Issue, state: OrchestratorState): boolean => {
-  if (normalizeState(issue.state) !== "todo") return false;
+const issueBlockedByNonTerminal = (issue: Issue, state: OrchestratorState): boolean => {
+  if (!state.requireUnblocked) return false;
   return issue.blocked_by.some((blocker) => !state.terminalStates.has(normalizeState(blocker.state)));
 };
+
+const issueHasRequiredReadyLabel = (issue: Issue, state: OrchestratorState): boolean => {
+  if (!state.requireReadyLabel) return true;
+  const labels = new Set(issue.labels.map(normalizeState));
+  return [...state.readyLabels].some((label) => labels.has(label));
+};
+
+const issueHasBlockedLabel = (issue: Issue, state: OrchestratorState): boolean => {
+  if (state.blockedLabels.size === 0) return false;
+  const labels = new Set(issue.labels.map(normalizeState));
+  return [...state.blockedLabels].some((label) => labels.has(label));
+};
+
+const issueBlockedByDetectedDependency = (issue: Issue, state: OrchestratorState): boolean =>
+  state.blockDetectedDependencies && (state.detectedDependencies.get(issue.id)?.length ?? 0) > 0;
 
 const priorityRank = (priority: number | null): number => (priority && priority >= 1 && priority <= 4 ? priority : 5);
 

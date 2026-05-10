@@ -11,6 +11,9 @@ export const snapshotState = (state: OrchestratorState) => ({
     startedAt: entry.startedAt.toISOString(),
     lastActivityAt: entry.lastActivityAt.toISOString(),
     workspacePath: entry.workspacePath,
+    branchName: entry.branchName ?? null,
+    baseBranch: entry.baseBranch ?? null,
+    changedFiles: entry.changedFiles ?? [],
     toolNames: entry.toolNames ?? [],
     skillSequence: entry.skillSequence ?? [],
     eventCount: entry.events.length,
@@ -43,6 +46,9 @@ export const snapshotState = (state: OrchestratorState) => ({
     issue: entry.issue,
     threadId: entry.threadId,
     workspacePath: entry.workspacePath,
+    branchName: entry.branchName ?? null,
+    baseBranch: entry.baseBranch ?? null,
+    changedFiles: entry.changedFiles ?? [],
     status: entry.status,
     output: entry.output,
     tokens: entry.tokens,
@@ -54,5 +60,6 @@ export const snapshotState = (state: OrchestratorState) => ({
     error: entry.error,
     gateResults: entry.gateResults,
     mode: entry.mode ?? null
-  }))
+  })),
+  pullRequests: [...state.pullRequests.values()]
 });

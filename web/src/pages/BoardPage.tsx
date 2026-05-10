@@ -195,8 +195,7 @@ const IssueActions = ({ card, onAction }: { card: BoardCard; onAction: (label: s
     ) : null}
     <DropdownItem
       onSelect={() => {
-        const head = window.prompt(`Branch for ${card.identifier}`);
-        if (head) onAction(`Creating PR for ${card.identifier}`, () => createPullRequest(card.issueId, head));
+        onAction(`Creating PR for ${card.identifier}`, () => createPullRequest(card.issueId, card.branchName ?? ""));
       }}
     >
       Create PR

@@ -3,16 +3,20 @@ import { Command } from "commander";
 import { ZodError, type ZodIssue } from "zod";
 import { loadWorkflowFile } from "./workflow/loader.js";
 import { parseWorkflowConfig } from "./workflow/schema.js";
+import { validateConfig } from "./config/validate.js";
 import { watchWorkflow } from "./workflow/watch.js";
 import { trackerForConfig } from "./tracker/registry.js";
 import { runtimeForConfig } from "./runtime/registry.js";
+import type { RuntimeCapabilities } from "./runtime/types.js";
 import { Orchestrator } from "./orchestrator/orchestrator.js";
 import { OrchestratorService } from "./orchestrator/service.js";
 import { createHttpServer } from "./observability/http.js";
 import type { SettingsSnapshot, SettingsPatch } from "./observability/http.js";
 import { boardColumnsForConfig, trackerStatesForBoard } from "./board/columns.js";
 import { buildBoardSnapshot } from "./board/snapshot.js";
-import { GitHubPullRequestClient, pullRequestLabels } from "./github/pr.js";
+import { GitHubPullRequestClient, pullRequestLabels, renderPullRequestInput } from "./github/pr.js";
+import { JsonNorthstarStore } from "./storage/json-store.js";
+import { MemoryNorthstarStore, type NorthstarStore } from "./storage/store.js";
 
 export interface CliArgs {
   workflowPath: string;
@@ -35,12 +39,15 @@ export const main = async (argv = process.argv): Promise<void> => {
   const workflow = await loadWorkflowFile(args.workflowPath);
   const config = parseWorkflowConfig(workflow.config);
   if (args.port != null) config.server.port = args.port;
+  const validation = validateConfig(config);
+  for (const warning of validation.warnings) console.warn(`Warning: ${warning}`);
   const tracker = trackerForConfig(config);
-  const orchestrator = new Orchestrator(config, tracker, runtimeForConfig(config.runtime), workflow.promptTemplate);
+  const orchestrator = new Orchestrator(config, tracker, runtimeForConfig(config.runtime), workflow.promptTemplate, storeForConfig(config));
   const service = new OrchestratorService(orchestrator);
   const boardColumns = boardColumnsForConfig(config);
   const prClient = pullRequestClientForConfig(config);
   const app = createHttpServer({
+    authToken: config.server.auth_token,
     getState: () => orchestrator.state,
     getBoardSnapshot: async () =>
       buildBoardSnapshot({
@@ -93,15 +100,39 @@ export const main = async (argv = process.argv): Promise<void> => {
         config.pull_request.labels_by_issue_label,
         issue?.labels ?? []
       );
-      return prClient.ensurePullRequest({
-        head: input.head,
+      const pullRequestInput = {
         base: input.base ?? config.pull_request.base_branch,
-        title: input.title ?? (issue ? `${issue.identifier}: ${issue.title}` : identifier),
-        body: input.body ?? "",
         draft: input.draft ?? config.pull_request.draft,
         labels,
         reviewers: input.reviewers ?? config.pull_request.reviewers
+      };
+      const result = issue ? orchestrator.state.results.get(issue.id) : undefined;
+      const awaiting = issue ? orchestrator.state.awaitingReview.get(issue.id) : undefined;
+      const rendered = issue
+        ? await renderPullRequestInput({
+            titleTemplate: config.pull_request.title_template,
+            bodyTemplate: config.pull_request.body_template,
+            issue,
+            result,
+            approvedPlan: awaiting?.planOutput,
+            explicitHead: input.head,
+            explicitTitle: input.title,
+            explicitBody: input.body
+          })
+        : {
+            head: input.head,
+            title: input.title ?? identifier,
+            body: input.body ?? ""
+          };
+      if (!rendered.head) return null;
+      const pr = await prClient.ensurePullRequest({
+        ...pullRequestInput,
+        head: rendered.head,
+        title: rendered.title,
+        body: rendered.body
       });
+      if (issue) await orchestrator.recordPullRequest(issue.id, pr);
+      return pr;
     }
   });
   if (config.server.port != null) {
@@ -125,23 +156,31 @@ export const main = async (argv = process.argv): Promise<void> => {
 
 const settingsForConfig = (config: ReturnType<typeof parseWorkflowConfig>): SettingsSnapshot => {
   const { runtime } = config;
+  const capabilities = capabilitiesForRuntimeKind(runtime.kind);
   let runtimeSnapshot: SettingsSnapshot["runtime"];
   if (runtime.kind === "claude_code") {
     runtimeSnapshot = {
       kind: runtime.kind,
       executionModel: runtime.model ?? null,
-      planningModel: runtime.planning_model ?? runtime.model ?? null
+      planningModel: runtime.planning_model ?? runtime.model ?? null,
+      capabilities
     };
   } else if (runtime.kind === "bedrock_anthropic") {
-    runtimeSnapshot = { kind: runtime.kind, executionModel: runtime.model_id, planningModel: runtime.planning_model ?? runtime.model_id };
+    runtimeSnapshot = {
+      kind: runtime.kind,
+      executionModel: runtime.model_id,
+      planningModel: runtime.planning_model ?? runtime.model_id,
+      capabilities
+    };
   } else if (runtime.kind === "gemini") {
     runtimeSnapshot = {
       kind: runtime.kind,
       executionModel: runtime.model ?? null,
-      planningModel: runtime.planning_model ?? runtime.model ?? null
+      planningModel: runtime.planning_model ?? runtime.model ?? null,
+      capabilities
     };
   } else {
-    runtimeSnapshot = { kind: runtime.kind, executionModel: null, planningModel: null };
+    runtimeSnapshot = { kind: runtime.kind, executionModel: null, planningModel: null, capabilities };
   }
   const { tracker } = config;
   return {
@@ -153,6 +192,40 @@ const settingsForConfig = (config: ReturnType<typeof parseWorkflowConfig>): Sett
       active_states: tracker.active_states,
       backlog_states: tracker.backlog_states
     }
+  };
+};
+
+const capabilitiesForRuntimeKind = (kind: string): RuntimeCapabilities => {
+  if (kind === "bedrock_anthropic" || kind === "gemini") {
+    return {
+      localShell: true,
+      filesystemEdits: true,
+      northstarTools: true,
+      tokenTelemetry: true,
+      multiTurnSession: true,
+      stop: false,
+      planningModel: true
+    };
+  }
+  if (kind === "claude_code") {
+    return {
+      localShell: true,
+      filesystemEdits: true,
+      northstarTools: false,
+      tokenTelemetry: false,
+      multiTurnSession: false,
+      stop: true,
+      planningModel: true
+    };
+  }
+  return {
+    localShell: true,
+    filesystemEdits: true,
+    northstarTools: false,
+    tokenTelemetry: false,
+    multiTurnSession: false,
+    stop: true,
+    planningModel: false
   };
 };
 
@@ -209,6 +282,11 @@ const pullRequestClientForConfig = (config: ReturnType<typeof parseWorkflowConfi
   const token =
     config.pull_request.token ?? config.integrations.github?.token ?? (config.tracker.kind === "github" ? config.tracker.token : undefined);
   return new GitHubPullRequestClient({ repo, token });
+};
+
+const storeForConfig = (config: ReturnType<typeof parseWorkflowConfig>): NorthstarStore => {
+  if (config.storage.kind === "json") return new JsonNorthstarStore(config.storage.path ?? ".northstar/state.json");
+  return new MemoryNorthstarStore();
 };
 
 if (import.meta.url === `file://${process.argv[1]}`) {

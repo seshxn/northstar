@@ -125,6 +125,24 @@ export const SettingsPage = ({
               Model editing is only available for the claude_code runtime.
             </p>
           ) : null}
+          {settings?.runtime.capabilities ? (
+            <>
+              <p className="mb-0 mt-2 text-[11px] font-bold uppercase text-[var(--muted-foreground)]">Runtime Capabilities</p>
+              <div className="grid grid-cols-[repeat(auto-fit,minmax(160px,1fr))] gap-2">
+                {Object.entries(settings.runtime.capabilities).map(([name, enabled]) => (
+                  <div
+                    key={name}
+                    className="flex items-center justify-between gap-2 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                  >
+                    <span>{capabilityLabel(name)}</span>
+                    <strong className={enabled ? "text-[var(--success)]" : "text-[var(--muted-foreground)]"}>
+                      {enabled ? "Yes" : "No"}
+                    </strong>
+                  </div>
+                ))}
+              </div>
+            </>
+          ) : null}
         </div>
       </Card>
 
@@ -140,3 +158,8 @@ export const SettingsPage = ({
     </section>
   );
 };
+
+const capabilityLabel = (value: string): string =>
+  value
+    .replace(/([A-Z])/g, " $1")
+    .replace(/^./, (char) => char.toUpperCase());

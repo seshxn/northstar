@@ -6,6 +6,15 @@ import type { Tool } from "../../tools/types.js";
 
 export class GeminiRuntime implements Runtime {
   readonly kind = "gemini";
+  readonly capabilities = {
+    localShell: true,
+    filesystemEdits: true,
+    northstarTools: true,
+    tokenTelemetry: true,
+    multiTurnSession: true,
+    stop: false,
+    planningModel: true
+  };
   readonly client: GoogleGenAI;
 
   constructor(private readonly config: { api_key?: string; model?: string; planning_model?: string; max_tokens?: number }) {

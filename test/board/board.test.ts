@@ -285,6 +285,55 @@ describe("board snapshot", () => {
     ]);
   });
 
+  test("includes stored pull request and branch metadata on cards", () => {
+    const state = createInitialState({ maxConcurrentAgents: 1, activeStates: ["Ready"], terminalStates: ["Done"] });
+    state.results.set("issue-1", {
+      issueId: "issue-1",
+      issue: "SYM-1",
+      threadId: "thread-1",
+      workspacePath: "/tmp/ws1",
+      status: "completed",
+      output: "done",
+      events: [],
+      startedAt: new Date("2026-05-05T08:00:00.000Z"),
+      completedAt: new Date("2026-05-05T08:30:00.000Z"),
+      attempt: 1,
+      gateResults: [],
+      branchName: "northstar/sym-1"
+    });
+    state.pullRequests.set("issue-1", {
+      issueId: "issue-1",
+      url: "https://github.com/owner/repo/pull/1",
+      number: 1,
+      state: "open"
+    });
+    const columns = boardColumnsForConfig(
+      parseWorkflowConfig({
+        board: {
+          columns: [{ id: "done", title: "Done", runtime_states: ["completed"] }]
+        }
+      })
+    );
+
+    const snapshot = buildBoardSnapshot({
+      columns,
+      issues: [issue()],
+      state,
+      now: new Date("2026-05-05T10:00:00.000Z")
+    });
+
+    expect(snapshot.metrics.pullRequestsOpen).toBe(1);
+    expect(snapshot.columns[0].cards[0]).toMatchObject({
+      issueId: "issue-1",
+      branchName: "northstar/sym-1",
+      pr: {
+        url: "https://github.com/owner/repo/pull/1",
+        number: 1,
+        state: "open"
+      }
+    });
+  });
+
   test.each([
     { mode: "planning" as const, expectedRuntimeStatus: "planning" },
     { mode: "execution" as const, expectedRuntimeStatus: "execution" },

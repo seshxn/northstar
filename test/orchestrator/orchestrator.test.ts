@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { Orchestrator } from "../../src/orchestrator/orchestrator.js";
 import { createInitialState } from "../../src/orchestrator/state.js";
-import { dispatchCandidates } from "../../src/orchestrator/tick.js";
+import { dispatchCandidates, shouldDispatchIssue } from "../../src/orchestrator/tick.js";
 import { retryDelayMs } from "../../src/orchestrator/retry.js";
 import { reconcileRunningIssues } from "../../src/orchestrator/reconcile.js";
 import { parseWorkflowConfig } from "../../src/workflow/schema.js";
@@ -70,6 +70,58 @@ describe("SPEC 17.4 orchestrator dispatch, retry, and reconcile", () => {
     });
 
     expect(dispatched).toEqual([]);
+  });
+
+  test("uses explicit dispatch states instead of all tracker active states", () => {
+    const state = createInitialState({
+      maxConcurrentAgents: 1,
+      activeStates: ["To Do", "In Progress"],
+      terminalStates: ["Done"],
+      dispatchStates: ["In Progress"]
+    });
+
+    expect(shouldDispatchIssue(issue({ state: "To Do" }), state)).toBe(false);
+    expect(shouldDispatchIssue(issue({ state: "In Progress" }), state)).toBe(true);
+  });
+
+  test("applies dispatch ready labels, blocked labels, and blocker checks", () => {
+    const state = createInitialState({
+      maxConcurrentAgents: 5,
+      activeStates: ["Ready"],
+      terminalStates: ["Done"],
+      dispatchStates: ["Ready"],
+      requireReadyLabel: true,
+      requireUnblocked: true,
+      readyLabels: ["ready-for-agent"],
+      blockedLabels: ["blocked"]
+    });
+
+    expect(shouldDispatchIssue(issue({ state: "Ready", labels: ["ready-for-agent"] }), state)).toBe(true);
+    expect(shouldDispatchIssue(issue({ state: "Ready", labels: [] }), state)).toBe(false);
+    expect(shouldDispatchIssue(issue({ state: "Ready", labels: ["ready-for-agent", "blocked"] }), state)).toBe(false);
+    expect(
+      shouldDispatchIssue(
+        issue({
+          state: "Ready",
+          labels: ["ready-for-agent"],
+          blocked_by: [{ id: "dep", identifier: "SYM-0", state: "In Progress" }]
+        }),
+        state
+      )
+    ).toBe(false);
+  });
+
+  test("blocks dispatch when detected dependencies are enforced", () => {
+    const state = createInitialState({
+      maxConcurrentAgents: 1,
+      activeStates: ["Ready"],
+      terminalStates: ["Done"],
+      dispatchStates: ["Ready"],
+      blockDetectedDependencies: true
+    });
+    state.detectedDependencies.set("id", ["SYM-0"]);
+
+    expect(shouldDispatchIssue(issue({ id: "id", state: "Ready" }), state)).toBe(false);
   });
 
   test("uses capped exponential retry backoff", () => {
