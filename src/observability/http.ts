@@ -10,6 +10,7 @@ let dashboardCache: string | null = null;
 let dashboardCachePath: string | null = null;
 
 export const createHttpServer = (opts: {
+  authToken?: string;
   getState: () => OrchestratorState;
   getBoardSnapshot?: () => Promise<BoardSnapshot>;
   getSettings?: () => SettingsSnapshot;
@@ -26,7 +27,7 @@ export const createHttpServer = (opts: {
   createPullRequest?: (
     identifier: string,
     input: {
-      head: string;
+      head?: string;
       title?: string;
       body?: string;
       base?: string;
@@ -37,6 +38,12 @@ export const createHttpServer = (opts: {
   ) => Promise<GitHubPullRequestMetadata | null>;
 }) => {
   const app = Fastify({ logger: false });
+  app.addHook("preHandler", async (request, reply) => {
+    if (!opts.authToken || request.method === "GET" || request.method === "HEAD" || request.method === "OPTIONS") return;
+    const authorization = request.headers.authorization ?? "";
+    if (authorization === `Bearer ${opts.authToken}`) return;
+    return reply.code(401).send({ error: "unauthorized" });
+  });
   app.get("/", async (_request, reply) => reply.type("text/html").send(await loadDashboardHtml()));
   app.get<{ Params: { "*": string } }>("/assets/*", async (request, reply) => {
     try {
@@ -170,10 +177,9 @@ export const createHttpServer = (opts: {
     Params: { identifier: string };
     Body: { head?: unknown; title?: unknown; body?: unknown; base?: unknown; draft?: unknown; labels?: unknown; reviewers?: unknown };
   }>("/api/v1/issues/:identifier/pr/create", async (request, reply) => {
-    const head = typeof request.body?.head === "string" ? request.body.head.trim() : "";
-    if (!head) return reply.code(400).send({ error: "head_required" });
+    const head = typeof request.body?.head === "string" ? request.body.head.trim() : undefined;
     const pr = await opts.createPullRequest?.(decodeURIComponent(request.params.identifier), {
-      head,
+      ...(head ? { head } : {}),
       title: typeof request.body?.title === "string" ? request.body.title : undefined,
       body: typeof request.body?.body === "string" ? request.body.body : undefined,
       base: typeof request.body?.base === "string" ? request.body.base : undefined,
@@ -197,6 +203,15 @@ export interface SettingsSnapshot {
     kind: string;
     executionModel: string | null;
     planningModel: string | null;
+    capabilities: {
+      localShell: boolean;
+      filesystemEdits: boolean;
+      northstarTools: boolean;
+      tokenTelemetry: boolean;
+      multiTurnSession: boolean;
+      stop: boolean;
+      planningModel: boolean;
+    };
   };
   tracker: {
     kind: string;

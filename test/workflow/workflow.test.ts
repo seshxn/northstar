@@ -214,6 +214,116 @@ describe("SPEC 17.1 workflow loading and config", () => {
     ]);
   });
 
+  test("parses optional dispatch policy config", () => {
+    const config = parseWorkflowConfig({
+      dispatch: {
+        mode: "tracker_states",
+        states: ["In Progress"],
+        require_unblocked: true,
+        require_ready_label: true,
+        ready_labels: ["ready-for-agent"],
+        blocked_labels: ["blocked", "needs-human"]
+      }
+    });
+
+    expect(config.dispatch).toEqual({
+      mode: "tracker_states",
+      states: ["In Progress"],
+      require_unblocked: true,
+      require_ready_label: true,
+      ready_labels: ["ready-for-agent"],
+      blocked_labels: ["blocked", "needs-human"]
+    });
+  });
+
+  test("parses server auth guard config", () => {
+    const config = parseWorkflowConfig(
+      {
+        server: {
+          port: 7331,
+          host: "0.0.0.0",
+          auth_token: "$NORTHSTAR_DASHBOARD_TOKEN"
+        }
+      },
+      { env: { NORTHSTAR_DASHBOARD_TOKEN: "dashboard-secret" } }
+    );
+
+    expect(config.server).toEqual({
+      port: 7331,
+      host: "0.0.0.0",
+      auth_token: "dashboard-secret",
+      allow_unauthenticated_remote: false
+    });
+  });
+
+  test("parses repository workspace strategy config", () => {
+    const config = parseWorkflowConfig(
+      {
+        workspace: {
+          root: "~/northstar-workspaces",
+          strategy: "git_worktree",
+          repo: "~/repo",
+          base_branch: "develop",
+          branch_template: "northstar/{{ issue.identifier | downcase }}-{{ issue.title | slug }}",
+          reuse_existing: false,
+          cleanup: {
+            remove_after_pr_merge: true
+          }
+        }
+      },
+      { homeDir: "/home/dev" }
+    );
+
+    expect(config.workspace).toEqual({
+      root: "/home/dev/northstar-workspaces",
+      strategy: "git_worktree",
+      repo: "/home/dev/repo",
+      base_branch: "develop",
+      branch_template: "northstar/{{ issue.identifier | downcase }}-{{ issue.title | slug }}",
+      reuse_existing: false,
+      cleanup: {
+        remove_after_pr_merge: true
+      }
+    });
+  });
+
+  test("parses optional local storage config", () => {
+    const config = parseWorkflowConfig(
+      {
+        storage: {
+          kind: "json",
+          path: "~/northstar/state.json",
+          retention_days: 14
+        }
+      },
+      { homeDir: "/home/dev" }
+    );
+
+    expect(config.storage).toEqual({
+      kind: "json",
+      path: "/home/dev/northstar/state.json",
+      retention_days: 14
+    });
+  });
+
+  test("parses optional sequencing config", () => {
+    const config = parseWorkflowConfig({
+      sequencing: {
+        enabled: true,
+        mode: "block_dispatch",
+        scan_on_refresh: true,
+        write_tracker_relationships: false
+      }
+    });
+
+    expect(config.sequencing).toEqual({
+      enabled: true,
+      mode: "block_dispatch",
+      scan_on_refresh: true,
+      write_tracker_relationships: false
+    });
+  });
+
   test("parses optional pull request handoff config", () => {
     const config = parseWorkflowConfig(
       {

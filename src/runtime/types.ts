@@ -5,7 +5,18 @@ export type RuntimeRunMode = "implementation" | "planning" | "revision" | "execu
 
 export interface Runtime {
   readonly kind: string;
+  readonly capabilities?: RuntimeCapabilities;
   startSession(opts: StartSessionOpts): Promise<Session>;
+}
+
+export interface RuntimeCapabilities {
+  localShell: boolean;
+  filesystemEdits: boolean;
+  northstarTools: boolean;
+  tokenTelemetry: boolean;
+  multiTurnSession: boolean;
+  stop: boolean;
+  planningModel: boolean;
 }
 
 export interface StartSessionOpts {

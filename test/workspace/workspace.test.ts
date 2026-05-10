@@ -3,6 +3,7 @@ import { mkdtemp, readFile, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { WorkspaceManager } from "../../src/workspace/manager.js";
+import { renderBranchName } from "../../src/workspace/git.js";
 
 describe("SPEC 17.2 workspace lifecycle", () => {
   test("sanitizes issue identifiers, creates contained workspaces, and runs create hook once", async () => {
@@ -43,5 +44,12 @@ describe("SPEC 17.2 workspace lifecycle", () => {
     await manager.remove(workspace.path);
 
     expect(await readFile(marker, "utf8")).toBe(workspace.path);
+  });
+
+  test("renders safe branch names for git workspace strategies", () => {
+    expect(renderBranchName("northstar/{{ issue.identifier | downcase }}-{{ issue.title | slug }}", {
+      identifier: "SYM-42",
+      title: "Add PR flow!"
+    })).toBe("northstar/sym-42-add-pr-flow");
   });
 });

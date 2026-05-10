@@ -1,10 +1,10 @@
 # Observability Guide
 
-Northstar exposes operator visibility through four mechanisms: a structured audit log, per-run telemetry (token counts, tool names, event streams), a Kanban board snapshot, and an HTTP state API.
+Northstar exposes operator visibility through four mechanisms: a structured audit log, per-run telemetry (token counts, tool names, event streams), a Kanban board snapshot, and an HTTP state API. When JSON storage is enabled, the state needed for restart-tolerant operation is rehydrated at startup.
 
 ## Audit Trail
 
-The orchestrator maintains an in-memory audit log (`state.auditLog`) that records key lifecycle events as they occur. The log is capped at 500 entries and the most recent 100 are exposed through `GET /api/v1/state`.
+The orchestrator maintains an audit log (`state.auditLog`) that records key lifecycle events as they occur. The log is capped at 500 entries and the most recent 100 are exposed through `GET /api/v1/state`. With `storage.kind: json`, audit entries are also written to the local state file and rehydrated on restart.
 
 ### Event Kinds
 
@@ -38,7 +38,7 @@ Each event carries:
 
 ### Limitations
 
-The audit log is in-memory only. Entries are lost on process restart. For persistent audit trails, consume the `/api/v1/state` endpoint periodically and write to an external store.
+JSON storage is local and single-process. For centralized audit trails, consume the `/api/v1/state` endpoint periodically and write to an external store.
 
 ## Token Telemetry
 
@@ -61,7 +61,7 @@ The dashboard's token burn counter shows cumulative session totals. Per-issue to
 
 ## Board Snapshot
 
-`GET /api/v1/board` returns a denormalised view that merges tracker state with runtime state. This is what the Kanban UI consumes.
+`GET /api/v1/board` returns a denormalised view that merges tracker state with runtime state. This is what the Kanban UI consumes. Cards can include branch metadata and stored GitHub PR metadata when available.
 
 ```typescript
 {
@@ -71,7 +71,22 @@ The dashboard's token burn counter shows cumulative session totals. Per-issue to
 }
 ```
 
-Each `BoardCard` carries `runtimeStatus`, `lastEvent`, `lastActivityAt`, `workspacePath`, `pr`, and `detectedDependencies` so the board can show agent activity without the UI needing to correlate across multiple endpoints.
+Each `BoardCard` carries `runtimeStatus`, `lastEvent`, `lastActivityAt`, `workspacePath`, `branchName`, `baseBranch`, `changedFiles`, `pr`, and `detectedDependencies` so the board can show agent activity and PR readiness without the UI needing to correlate across multiple endpoints.
+
+## HTTP Auth
+
+The server binds to `127.0.0.1` by default. Startup validation rejects non-local hosts unless one of these is true:
+
+- `server.auth_token` is configured.
+- `server.allow_unauthenticated_remote: true` is explicitly configured.
+
+When `server.auth_token` is set, mutating endpoints require:
+
+```http
+Authorization: Bearer <token>
+```
+
+Read-only dashboard and state endpoints remain available. The React dashboard attaches a token from `localStorage.northstar-auth-token` to API requests.
 
 ## HTTP Endpoints
 
@@ -86,7 +101,7 @@ Each `BoardCard` carries `runtimeStatus`, `lastEvent`, `lastActivityAt`, `worksp
 | `POST` | `/api/v1/issues/:id/reject`        | Reject a plan                                                 |
 | `POST` | `/api/v1/issues/:id/move`          | Move an issue to a tracker state                              |
 | `POST` | `/api/v1/issues/:id/comment`       | Post a comment on a tracker issue                             |
-| `POST` | `/api/v1/issues/:id/pr/create`     | Create or reuse a GitHub PR                                   |
+| `POST` | `/api/v1/issues/:id/pr/create`     | Create or reuse a GitHub PR using branch/run metadata         |
 | `POST` | `/api/v1/:id/stop`                 | Stop an in-progress run                                       |
 | `POST` | `/api/v1/:id/retry`                | Retry a failed run immediately                                |
 | `POST` | `/api/v1/dependencies/scan`        | Trigger LLM dependency analysis                               |

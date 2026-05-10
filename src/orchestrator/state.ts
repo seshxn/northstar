@@ -40,6 +40,9 @@ export interface RunningEntry {
   toolNames?: string[];
   events: RuntimeEvent[];
   skillSequence?: string[];
+  branchName?: string | null;
+  baseBranch?: string | null;
+  changedFiles?: string[];
 }
 
 export interface RetryEntry {
@@ -69,6 +72,9 @@ export interface RunResultEntry {
   attempt: number;
   error?: string;
   gateResults: GateResultEntry[];
+  branchName?: string | null;
+  baseBranch?: string | null;
+  changedFiles?: string[];
 }
 
 export interface GateResultEntry {
@@ -77,11 +83,24 @@ export interface GateResultEntry {
   output?: string;
 }
 
+export interface PullRequestEntry {
+  issueId: string;
+  url: string;
+  number: number;
+  state: "open" | "closed" | "merged";
+}
+
 export interface OrchestratorState {
   pollIntervalMs: number;
   maxConcurrentAgents: number;
   activeStates: Set<string>;
   terminalStates: Set<string>;
+  dispatchStates: Set<string>;
+  requireUnblocked: boolean;
+  requireReadyLabel: boolean;
+  readyLabels: Set<string>;
+  blockedLabels: Set<string>;
+  blockDetectedDependencies: boolean;
   maxConcurrentAgentsByState: Map<string, number>;
   running: Map<string, RunningEntry>;
   completed: Set<string>;
@@ -91,6 +110,7 @@ export interface OrchestratorState {
   tokenTotals: TokenTotals;
   results: Map<string, RunResultEntry>;
   detectedDependencies: Map<string, string[]>;
+  pullRequests: Map<string, PullRequestEntry>;
   auditLog: AuditEvent[];
   auditSeq: number;
 }
@@ -100,12 +120,24 @@ export const createInitialState = (opts: {
   maxConcurrentAgents: number;
   activeStates: string[];
   terminalStates: string[];
+  dispatchStates?: string[];
+  requireUnblocked?: boolean;
+  requireReadyLabel?: boolean;
+  readyLabels?: string[];
+  blockedLabels?: string[];
+  blockDetectedDependencies?: boolean;
   maxConcurrentAgentsByState?: Record<string, number>;
 }): OrchestratorState => ({
   pollIntervalMs: opts.pollIntervalMs ?? 30_000,
   maxConcurrentAgents: opts.maxConcurrentAgents,
   activeStates: new Set(opts.activeStates.map(normalizeState)),
   terminalStates: new Set(opts.terminalStates.map(normalizeState)),
+  dispatchStates: new Set((opts.dispatchStates ?? opts.activeStates).map(normalizeState)),
+  requireUnblocked: opts.requireUnblocked ?? true,
+  requireReadyLabel: opts.requireReadyLabel ?? false,
+  readyLabels: new Set((opts.readyLabels ?? []).map(normalizeState)),
+  blockedLabels: new Set((opts.blockedLabels ?? []).map(normalizeState)),
+  blockDetectedDependencies: opts.blockDetectedDependencies ?? false,
   maxConcurrentAgentsByState: new Map(
     Object.entries(opts.maxConcurrentAgentsByState ?? {}).map(([key, value]) => [normalizeState(key), value])
   ),
@@ -117,6 +149,7 @@ export const createInitialState = (opts: {
   tokenTotals: { input: 0, output: 0, total: 0 },
   results: new Map(),
   detectedDependencies: new Map(),
+  pullRequests: new Map(),
   auditLog: [],
   auditSeq: 0
 });

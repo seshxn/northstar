@@ -8,6 +8,15 @@ import type { Tool } from "../../tools/types.js";
 
 export class BedrockAnthropicRuntime implements Runtime {
   readonly kind = "bedrock_anthropic";
+  readonly capabilities = {
+    localShell: true,
+    filesystemEdits: true,
+    northstarTools: true,
+    tokenTelemetry: true,
+    multiTurnSession: true,
+    stop: false,
+    planningModel: true
+  };
   readonly client: BedrockRuntimeClient;
 
   constructor(

@@ -31,6 +31,15 @@ const modelForTurn = (config: ClaudeCodeConfig, mode: RuntimeRunMode | undefined
 
 export class ClaudeCodeRuntime implements Runtime {
   readonly kind = "claude_code";
+  readonly capabilities = {
+    localShell: true,
+    filesystemEdits: true,
+    northstarTools: false,
+    tokenTelemetry: false,
+    multiTurnSession: false,
+    stop: true,
+    planningModel: true
+  };
   constructor(private readonly config: ClaudeCodeConfig) {}
 
   async startSession(opts: StartSessionOpts): Promise<Session> {

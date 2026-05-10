@@ -139,9 +139,16 @@ export const IssueSheet = ({ awaitingPlan, card, state, onClose, onAction }: Pro
 
           <div className="mb-5 border-t border-[var(--border)] pt-4">
             <h3 className="mb-2 mt-0 text-sm font-semibold">Workspace</h3>
-            <code className="font-mono-geist rounded-[calc(var(--radius)-4px)] bg-[var(--background)] px-2 py-1 text-xs">
-              {card.workspacePath || "Not assigned"}
-            </code>
+            <div className="grid gap-2">
+              <code className="font-mono-geist rounded-[calc(var(--radius)-4px)] bg-[var(--background)] px-2 py-1 text-xs">
+                {card.workspacePath || "Not assigned"}
+              </code>
+              {card.branchName ? (
+                <code className="font-mono-geist rounded-[calc(var(--radius)-4px)] bg-[var(--background)] px-2 py-1 text-xs">
+                  {card.branchName}
+                </code>
+              ) : null}
+            </div>
           </div>
 
           {card.runtimeStatus === "awaiting_review" ? (
@@ -289,4 +296,3 @@ const TelemetryStat = ({ icon, label, value }: { icon: React.ReactNode; label: s
     <div className="token-counter text-sm font-semibold">{value}</div>
   </div>
 );
-

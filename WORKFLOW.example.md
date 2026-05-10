@@ -36,15 +36,41 @@ runtime:
 
 workspace:
   root: ~/northstar_workspaces
+  strategy: git_worktree
+  repo: ~/src/product-repo
+  base_branch: main
+  branch_template: "northstar/{{ issue.identifier | downcase }}-{{ issue.title | slug }}"
+  reuse_existing: true
+  cleanup:
+    remove_after_pr_merge: false
 
 agent:
   max_concurrent_agents: 4
   max_concurrent_agents_by_state:
     "In Progress": 2
 
+dispatch:
+  mode: tracker_states
+  states: ["In Progress"]
+  require_unblocked: true
+  blocked_labels: ["blocked", "needs-human"]
+
 server:
   host: 127.0.0.1
   port: 4000
+  # Required when binding to a non-local host unless allow_unauthenticated_remote is true.
+  auth_token: $NORTHSTAR_DASHBOARD_TOKEN
+
+storage:
+  kind: json
+  path: ~/.northstar/state.json
+  retention_days: 30
+
+sequencing:
+  enabled: true
+  mode: advisory
+  scan_on_refresh: false
+  write_tracker_relationships: false
 
 board:
   columns:

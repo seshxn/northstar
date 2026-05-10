@@ -1,6 +1,23 @@
 import { describe, expect, test, vi } from "vitest";
-import { GitHubPullRequestClient, parseGitHubRepo, pullRequestLabels } from "../../src/github/pr.js";
+import { GitHubPullRequestClient, parseGitHubRepo, pullRequestLabels, renderPullRequestInput } from "../../src/github/pr.js";
 import type { GitHubRequest } from "../../src/tracker/github/client.js";
+import type { Issue } from "../../src/tracker/issue.js";
+
+const issue = (overrides: Partial<Issue> = {}): Issue => ({
+  id: "issue-1",
+  identifier: "ENG-1",
+  title: "Ship flow",
+  description: null,
+  priority: null,
+  state: "Done",
+  branch_name: null,
+  url: null,
+  labels: [],
+  blocked_by: [],
+  created_at: null,
+  updated_at: null,
+  ...overrides
+});
 
 describe("GitHub pull request handoff", () => {
   test("dedupes base and issue-derived labels case-insensitively", () => {
@@ -19,6 +36,35 @@ describe("GitHub pull request handoff", () => {
   test("validates repository names", () => {
     expect(parseGitHubRepo("owner/repo")).toEqual({ owner: "owner", repo: "repo" });
     expect(() => parseGitHubRepo("repo")).toThrow(/owner\/name/);
+  });
+
+  test("renders pull request title and body templates from issue and run context", async () => {
+    const rendered = await renderPullRequestInput({
+      titleTemplate: "{{ issue.identifier }}: {{ issue.title }}",
+      bodyTemplate: "Branch: {{ northstar.branch }}\n\n{{ northstar.approved_plan }}\n\n{{ northstar.verification }}",
+      issue: issue(),
+      result: {
+        issueId: "issue-1",
+        issue: "ENG-1",
+        threadId: "thread",
+        workspacePath: "/tmp/workspace",
+        status: "completed",
+        output: "Summary",
+        events: [],
+        startedAt: new Date("2026-05-10T00:00:00.000Z"),
+        completedAt: new Date("2026-05-10T00:01:00.000Z"),
+        attempt: 1,
+        gateResults: [{ gate: "test", status: "completed", output: "npm test passed" }],
+        branchName: "northstar/eng-1-ship-flow"
+      },
+      approvedPlan: "Approved plan"
+    });
+
+    expect(rendered).toEqual({
+      head: "northstar/eng-1-ship-flow",
+      title: "ENG-1: Ship flow",
+      body: "Branch: northstar/eng-1-ship-flow\n\nApproved plan\n\nnpm test passed"
+    });
   });
 
   test("finds an existing open pull request before creating one", async () => {

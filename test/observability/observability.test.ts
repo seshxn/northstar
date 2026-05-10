@@ -61,7 +61,7 @@ describe("SPEC 17.6 observability", () => {
     const feedback: Array<{ identifier: string; message: string }> = [];
     const rejections: Array<{ identifier: string; message?: string }> = [];
     const moves: Array<{ identifier: string; state: string }> = [];
-    const pullRequests: Array<{ identifier: string; head: string }> = [];
+    const pullRequests: Array<{ identifier: string; head?: string }> = [];
     const app = createHttpServer({
       getState: () => state,
       getBoardSnapshot: async () => ({
@@ -89,7 +89,16 @@ describe("SPEC 17.6 observability", () => {
         runtime: {
           kind: "claude_code",
           executionModel: "claude-sonnet-exec",
-          planningModel: "claude-opus-plan"
+          planningModel: "claude-opus-plan",
+          capabilities: {
+            localShell: true,
+            filesystemEdits: true,
+            northstarTools: false,
+            tokenTelemetry: false,
+            multiTurnSession: false,
+            stop: true,
+            planningModel: true
+          }
         },
         tracker: {
           kind: "linear",
@@ -147,7 +156,16 @@ describe("SPEC 17.6 observability", () => {
       runtime: {
         kind: "claude_code",
         executionModel: "claude-sonnet-exec",
-        planningModel: "claude-opus-plan"
+        planningModel: "claude-opus-plan",
+        capabilities: {
+          localShell: true,
+          filesystemEdits: true,
+          northstarTools: false,
+          tokenTelemetry: false,
+          multiTurnSession: false,
+          stop: true,
+          planningModel: true
+        }
       },
       tracker: {
         kind: "linear",
@@ -178,8 +196,8 @@ describe("SPEC 17.6 observability", () => {
     const pr = await app.inject({ method: "POST", url: "/api/v1/issues/SYM-1/pr/create", payload: { head: "feature/sym-1" } });
     expect(pr.statusCode).toBe(202);
     expect(pr.json()).toMatchObject({ pr: { number: 1, state: "open" } });
-    expect((await app.inject({ method: "POST", url: "/api/v1/issues/SYM-1/pr/create", payload: {} })).statusCode).toBe(400);
-    expect(refreshes).toBe(9);
+    expect((await app.inject({ method: "POST", url: "/api/v1/issues/SYM-1/pr/create", payload: {} })).statusCode).toBe(202);
+    expect(refreshes).toBe(10);
     expect(stopped).toEqual(["SYM-1"]);
     expect(retried).toEqual(["SYM-1"]);
     expect(approvals).toEqual(["SYM-1", "SYM-1"]);
@@ -189,7 +207,10 @@ describe("SPEC 17.6 observability", () => {
     ]);
     expect(rejections).toEqual([{ identifier: "SYM-1", message: "not safe" }]);
     expect(moves).toEqual([{ identifier: "SYM-1", state: "In Progress" }]);
-    expect(pullRequests).toEqual([{ identifier: "SYM-1", head: "feature/sym-1" }]);
+    expect(pullRequests).toEqual([
+      { identifier: "SYM-1", head: "feature/sym-1" },
+      { identifier: "SYM-1", head: undefined }
+    ]);
     await app.close();
   });
 
@@ -208,6 +229,27 @@ describe("SPEC 17.6 observability", () => {
     expect(response.body).toContain("Northstar dashboard build missing");
     expect(response.body).toContain("npm run build:web");
     expect(response.body).not.toContain("Northstar dashboard</h1>");
+    await app.close();
+  });
+
+  test("HTTP server requires bearer auth for mutating routes when configured", async () => {
+    const state = createInitialState({ maxConcurrentAgents: 1, activeStates: ["Todo"], terminalStates: ["Done"] });
+    let refreshes = 0;
+    const app = createHttpServer({
+      authToken: "dashboard-secret",
+      getState: () => state,
+      refresh: async () => {
+        refreshes += 1;
+      }
+    });
+
+    expect((await app.inject({ method: "GET", url: "/api/v1/state" })).statusCode).toBe(200);
+    expect((await app.inject({ method: "POST", url: "/api/v1/refresh" })).statusCode).toBe(401);
+    expect((await app.inject({ method: "POST", url: "/api/v1/refresh", headers: { authorization: "Bearer wrong" } })).statusCode).toBe(401);
+    expect(
+      (await app.inject({ method: "POST", url: "/api/v1/refresh", headers: { authorization: "Bearer dashboard-secret" } })).statusCode
+    ).toBe(202);
+    expect(refreshes).toBe(1);
     await app.close();
   });
 });

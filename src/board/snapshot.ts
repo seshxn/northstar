@@ -40,6 +40,9 @@ export interface BoardCard {
   lastActivityAt: string | null;
   lastEvent: string | null;
   workspacePath: string | null;
+  branchName: string | null;
+  baseBranch: string | null;
+  changedFiles: string[];
   pr: {
     url: string;
     number: number;
@@ -60,6 +63,9 @@ export const buildBoardSnapshot = (opts: {
     for (const card of cards) {
       card.detectedDependencies = opts.detectedDependencies.get(card.issueId) ?? [];
     }
+  }
+  for (const card of cards) {
+    card.pr = opts.state.pullRequests.get(card.issueId) ?? null;
   }
   const columnSnapshots = opts.columns.map((column) => ({
     id: column.id,
@@ -89,7 +95,7 @@ export const buildBoardSnapshot = (opts: {
       completed: [...opts.state.results.values()].filter(
         (result) => result.status === "completed" && !runtimeStateTakesPrecedence(opts.state, result.issueId)
       ).length,
-      pullRequestsOpen: 0
+      pullRequestsOpen: [...opts.state.pullRequests.values()].filter((pr) => pr.state === "open").length
     },
     updatedAt: (opts.now ?? new Date()).toISOString()
   };
@@ -104,7 +110,10 @@ const mergeCards = (issues: Issue[], state: OrchestratorState): BoardCard[] => {
       runtimeStatus: runningModeToRuntimeStatus(running.mode),
       lastActivityAt: running.lastActivityAt.toISOString(),
       lastEvent: lastEventMessage(running.events.at(-1)),
-      workspacePath: running.workspacePath ?? null
+      workspacePath: running.workspacePath ?? null,
+      branchName: running.branchName ?? null,
+      baseBranch: running.baseBranch ?? null,
+      changedFiles: running.changedFiles ?? []
     });
   }
 
@@ -139,7 +148,10 @@ const mergeCards = (issues: Issue[], state: OrchestratorState): BoardCard[] => {
       runtimeStatus: result.status === "completed" ? "completed" : "failed",
       lastActivityAt: result.completedAt.toISOString(),
       lastEvent: result.output ?? lastEventMessage(result.events.at(-1)) ?? existing.lastEvent,
-      workspacePath: result.workspacePath || existing.workspacePath
+      workspacePath: result.workspacePath || existing.workspacePath,
+      branchName: result.branchName ?? existing.branchName,
+      baseBranch: result.baseBranch ?? existing.baseBranch,
+      changedFiles: result.changedFiles ?? existing.changedFiles
     });
   }
 
@@ -163,6 +175,9 @@ const cardFromIssue = (issue: Issue): BoardCard => ({
   lastActivityAt: issue.updated_at,
   lastEvent: null,
   workspacePath: null,
+  branchName: issue.branch_name,
+  baseBranch: null,
+  changedFiles: [],
   pr: null,
   detectedDependencies: []
 });
@@ -180,6 +195,9 @@ const cardFromAwaiting = (entry: { issueId: string; issue: string; title: string
   lastActivityAt: entry.updatedAt.toISOString(),
   lastEvent: null,
   workspacePath: entry.workspacePath,
+  branchName: null,
+  baseBranch: null,
+  changedFiles: [],
   pr: null,
   detectedDependencies: []
 });

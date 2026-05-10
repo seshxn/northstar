@@ -2,6 +2,7 @@ import { rm, mkdir, lstat, realpath } from "node:fs/promises";
 import { dirname, join, resolve, sep } from "node:path";
 import type { Issue } from "../tracker/issue.js";
 import { runHook } from "./hooks.js";
+import { cloneGitRepo, createGitWorktree, inspectGitWorkspace, renderBranchName } from "./git.js";
 
 export interface WorkspaceHooks {
   after_create?: string;
@@ -14,35 +15,80 @@ export interface WorkspaceHooks {
 export interface WorkspaceManagerConfig {
   root: string;
   hooks?: WorkspaceHooks;
+  strategy?: "directory" | "git_worktree" | "clone";
+  repo?: string;
+  baseBranch?: string;
+  branchTemplate?: string;
+  reuseExisting?: boolean;
 }
 
 export interface WorkspaceInfo {
   path: string;
   workspaceKey: string;
   createdNow: boolean;
+  strategy: "directory" | "git_worktree" | "clone";
+  repoPath?: string;
+  branchName?: string | null;
+  baseBranch?: string | null;
+  changedFiles?: string[];
 }
 
 export class WorkspaceManager {
   private readonly root: string;
   private readonly hooks: WorkspaceHooks;
+  private readonly strategy: "directory" | "git_worktree" | "clone";
+  private readonly repo?: string;
+  private readonly baseBranch: string;
+  private readonly branchTemplate: string;
+  private readonly reuseExisting: boolean;
 
   constructor(config: WorkspaceManagerConfig) {
     this.root = resolve(config.root);
     this.hooks = config.hooks ?? {};
+    this.strategy = config.strategy ?? "directory";
+    this.repo = config.repo ? resolve(config.repo) : undefined;
+    this.baseBranch = config.baseBranch ?? "main";
+    this.branchTemplate = config.branchTemplate ?? "northstar/{{ issue.identifier | downcase }}";
+    this.reuseExisting = config.reuseExisting ?? true;
   }
 
   async createForIssue(issue: Pick<Issue, "id" | "identifier" | "title">): Promise<WorkspaceInfo> {
-    return this.createForIdentifier(issue.identifier, issue.id);
+    return this.createForIdentifier(issue.identifier, issue.id, issue);
   }
 
-  async createForIdentifier(identifier: string, issueId: string | null = null): Promise<WorkspaceInfo> {
+  async createForIdentifier(
+    identifier: string,
+    issueId: string | null = null,
+    issue: Pick<Issue, "identifier" | "title"> = { identifier, title: identifier }
+  ): Promise<WorkspaceInfo> {
     await mkdir(this.root, { recursive: true });
     await this.rejectRawPathEscape(identifier);
     const workspaceKey = safeIdentifier(identifier);
     const workspacePath = resolve(this.root, workspaceKey);
     await this.validateContained(workspacePath);
     const createdNow = !(await existsAsDirectory(workspacePath));
-    if (createdNow) await mkdir(workspacePath, { recursive: true });
+    const branchName = this.strategy === "directory" ? null : renderBranchName(this.branchTemplate, issue);
+    if (this.strategy === "directory") {
+      if (createdNow) await mkdir(workspacePath, { recursive: true });
+    } else if (this.strategy === "git_worktree") {
+      if (!this.repo) throw new Error("workspace.repo is required for git_worktree strategy");
+      await createGitWorktree({
+        repo: this.repo,
+        path: workspacePath,
+        branch: branchName ?? workspaceKey,
+        baseBranch: this.baseBranch,
+        reuseExisting: this.reuseExisting
+      });
+    } else {
+      if (!this.repo) throw new Error("workspace.repo is required for clone strategy");
+      await cloneGitRepo({
+        repo: this.repo,
+        path: workspacePath,
+        branch: branchName ?? workspaceKey,
+        baseBranch: this.baseBranch,
+        reuseExisting: this.reuseExisting
+      });
+    }
     await this.validateContained(workspacePath);
     if (createdNow) {
       await runHook(this.hooks.after_create, {
@@ -52,7 +98,26 @@ export class WorkspaceManager {
         timeoutMs: this.hooks.timeout_ms ?? 60_000
       });
     }
-    return { path: workspacePath, workspaceKey, createdNow };
+    return {
+      path: workspacePath,
+      workspaceKey,
+      createdNow,
+      strategy: this.strategy,
+      repoPath: this.repo,
+      branchName,
+      baseBranch: this.strategy === "directory" ? null : this.baseBranch,
+      changedFiles: []
+    };
+  }
+
+  async inspect(workspace: WorkspaceInfo): Promise<WorkspaceInfo> {
+    if (workspace.strategy === "directory") return workspace;
+    const inspected = await inspectGitWorkspace(workspace.path);
+    return {
+      ...workspace,
+      branchName: inspected.branchName ?? workspace.branchName,
+      changedFiles: inspected.changedFiles
+    };
   }
 
   async runBeforeRun(workspace: string, issue: Pick<Issue, "id" | "identifier">): Promise<void> {
